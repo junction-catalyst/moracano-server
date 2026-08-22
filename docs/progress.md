@@ -153,3 +153,42 @@ end-to-end로 검증했다.
   입력 경로·prompt 정제 로직 재사용).
 - 제시어 후보는 vocab 검사 통과한 것만 사용; OOV fallback 매핑(`쫌→쪼` 등)을 `align.py`에 넣을지 결정.
 - 서버 배포 시 `model.to("cuda")`는 `service.py` lifespan에서 호출해야 함(현재 `load_aligner`는 CPU에 올림).
+
+## 2026-08-22 — 정렬 모델 축소(base 자모 모델) + 피치 2-pass + 임계값 캘리브레이션
+
+앞 세션의 검증 스크립트로 후속 실험을 돌려 세 가지를 바꿨다. 모든 수치는 AI-Hub 경상도 실발화 300개(시드 0)
+기준, MFA TextGrid 대비 음절 onset 오차.
+
+- **정렬 모델을 `Kkonjeong/wav2vec2-base-korean`(94M, 자모 vocab 51)으로 교체**. HF의 한국어 CTC 모델을 훑은 결과
+  vocab이 완성형 음절인 모델(kresnik large 1,202 / w11wo 300m 1,202 / kresnik 300m 1,074)은 전부 `쫌` 같은 음절이
+  빠져 OOV 문제가 같고, 자모 vocab 모델(Kkonjeong base, fleek large)은 완성형을 전부 표현해 OOV가 0. `align.py`에
+  자모 분해(`syllable_jamo`)·토큰→음절 재그룹(`group_spans`)을 넣어 두 vocab 유형을 자동 처리한다.
+
+  | 모델 | 파라미터 | 성공 | onset 중앙값 | ≤50ms | ≤100ms | 최악 발화 | 정렬 지연(GPU) |
+  |---|---|---|---|---|---|---|---|
+  | kresnik large (기존) | 317M | 252/300 (OOV 48) | 29ms | 73% | 92% | 1,117ms | 26ms |
+  | Kkonjeong base | 94M | 300/300 | 43ms | 58% | 90% | 272ms | 19ms |
+  | Kkonjeong base + 20ms lag 보정 | 94M | 300/300 | **36ms** | 64% | 91% | 272ms | 19ms |
+
+  시드 1로 다른 300개를 돌려도 37ms / 63% / 90%로 같음. 대가: 음절 경계가 large보다 거칠어 `npvi` 중앙값이
+  48 → 63으로 올라감(리듬 피처의 절대값이 모델에 종속됨). 정밀도가 더 필요하면 `ALIGNER_MODEL`만 large로 되돌리면
+  되고, 그 경우 제시어의 vocab 사전 검사가 필수.
+- **CTC onset lag 보정**: 두 모델 모두 MFA 대비 onset이 늦게 찍힘(부호 있는 중앙값 large +15ms, base +21ms).
+  `ONSET_LAG_SEC = 0.02`(1프레임)만큼 앞당기자 base 중앙값 43 → 36ms.
+- **피치 2-pass(de Looze & Hirst)**: `pitch_contour`를 60~700Hz 1차 추출 → 화자 q25·q75로 floor/ceiling 재설정
+  후 2차 추출로 변경. 252발화에서 `pitch_range` > 300Hz 비율 35% → 0%, 반음 범위 중앙값 21.4 → 12.7st, 유성
+  구간 비율은 0.70 → 0.68로 유지. `to_pitch_ac`의 octave_jump_cost 조정은 20%까지만 줄어 채택하지 않음.
+- **라벨 임계값 캘리브레이션**: 600발화(시드 0+1, young/old 300씩) 분포로 `DEFAULT_THRESHOLDS`를
+  rising 30 → 120 Hz/s(p90), long vowel 0.25 → 0.224s(p75), npvi 40 → 75(p75)로 교체. 기존 값으로는
+  Strong Rhythm이 94%에서 켜져 변별력이 없었음. 분포: `avg_duration` p50 0.183 / p75 0.224 / p90 0.269,
+  `npvi` p50 63 / p75 75 / p90 87, `speaking_rate` p50 5.5, `pitch_slope_end`는 28%가 0(끝 200ms 무성).
+- `load_aligner`가 CUDA 있으면 모델을 GPU로 올리도록 변경(`service.py` 수정 불필요). 레이턴시: 정렬 19ms +
+  피치·피처 10ms = 발화당 28ms.
+
+### Next
+
+- 마지막 음절 offset(중앙값 130ms 오차)과 발화 끝 늘임: parselmouth intensity/voicing 끝점으로 보정 검토.
+- `pitch_slope_end`를 Hz/s 대신 반음/s로 바꿀지 결정(화자 기본 피치에 덜 종속). 계약 스키마 변경이 필요.
+- 실제 제시어(짧은 낭독)로 녹음한 샘플이 모이면 임계값·PCA 재캘리브레이션. 현재 값은 대화체 기준.
+- 레퍼런스 코퍼스 피처 추출 스크립트(PCA 피팅용)는 `scripts/validate_alignment.py`의 입력 경로·prompt 정제를
+  재사용해 작성.
