@@ -6,6 +6,20 @@ def load_sound(path: str) -> parselmouth.Sound:
     return parselmouth.Sound(path)
 
 
+def speech_end(samples: np.ndarray, sample_rate: int, after: float, drop_db: float = 20.0) -> float | None:
+    # 마지막 음절은 다음 음절 onset이 없어 CTC로는 끝을 못 잡는다. `after`(마지막 음절 onset) 이후 intensity가
+    # 피크 대비 drop_db 아래로 떨어지기 직전 시각을 발화 끝으로 본다. AI-Hub 503발화에서 MFA 대비 오차 중앙값
+    # 142ms → 45ms(20dB가 부호 편향 0으로 최적, 15dB는 -10ms, 25dB는 +25ms)
+    sound = parselmouth.Sound(samples.astype(np.float64), sampling_frequency=sample_rate)
+    intensity = sound.to_intensity(minimum_pitch=75.0, time_step=0.005)
+    times, values = intensity.xs(), intensity.values[0]
+    tail = times >= after
+    if not tail.any():
+        return None
+    loud = tail & (values >= values[tail].max() - drop_db)
+    return float(times[loud].max())
+
+
 def pitch_contour(sound: parselmouth.Sound) -> tuple[np.ndarray, np.ndarray]:
     # 2-pass 추정(de Looze & Hirst 2008): 넓은 범위로 한 번 뽑아 화자의 q25/q75를 구한 뒤 그 화자에 맞는
     # floor/ceiling으로 다시 추출. 기본 75~600Hz 고정 범위에서는 AI-Hub 실발화의 35%에서 옥타브 점프가 섞였음

@@ -152,6 +152,7 @@ def compare(aligned: list[dict], ref: list[tuple | None]) -> dict:
         "raw_dur": [a["end"] - a["start"] for a, _, _ in pairs],
         "ext_dur": [e - a["start"] for a, e, _ in pairs],
         "ref_dur": [r[1] - r[0] for _, _, r in pairs],
+        "last_offset": [aligned[-1]["end"] - ref[-1][1]] if ref[-1] is not None else [],
     }
 
 
@@ -243,6 +244,7 @@ def main() -> int:
         print("onset error vs MFA:", summarize(all_cmp["onset"]))
         print("offset error (raw CTC span end):", summarize(all_cmp["offset"]))
         print("offset error (extended to next onset):", summarize(all_cmp["ext_offset"]))
+        print("last-syllable offset error:", summarize(all_cmp["last_offset"]))
         print(f"syllable duration: MFA mean={np.mean(all_cmp['ref_dur']) * 1000:.0f}ms "
               f"raw CTC span mean={np.mean(all_cmp['raw_dur']) * 1000:.0f}ms "
               f"extended mean={np.mean(all_cmp['ext_dur']) * 1000:.0f}ms")

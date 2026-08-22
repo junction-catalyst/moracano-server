@@ -73,3 +73,14 @@ def test_extend_spans_last_syllable_uses_typical_duration_capped_by_audio_end():
 def test_extend_spans_single_syllable_unchanged():
     spans = [{"text": "뭐", "start": 0.10, "end": 0.12}]
     assert extend_spans(spans, audio_end=1.0) == spans
+
+
+def test_extend_spans_prefers_speech_end_for_last_syllable():
+    spans = [
+        {"text": "뭐", "start": 0.10, "end": 0.12},
+        {"text": "노", "start": 0.30, "end": 0.32},
+    ]
+    assert extend_spans(spans, audio_end=1.0, speech_end_time=0.75)[-1]["end"] == 0.75
+    assert extend_spans(spans, audio_end=0.60, speech_end_time=0.75)[-1]["end"] == 0.60
+    # 발화 끝이 마지막 onset보다 앞이면(추정 실패) 중앙값 길이 규칙으로 되돌아감
+    assert extend_spans(spans, audio_end=1.0, speech_end_time=0.25)[-1]["end"] == pytest.approx(0.50)

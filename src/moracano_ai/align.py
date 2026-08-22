@@ -3,6 +3,8 @@ import torch
 import torchaudio
 from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor
 
+from moracano_ai.prosody import speech_end
+
 # 음절 vocab 317M 모델 + OOV 근사 대체(nearest_syllable). 같은 조건에서 자모 vocab 94M 모델
 # (Kkonjeong/wav2vec2-base-korean)보다 onset 오차 중앙값 29ms vs 36ms, 50ms 이내 80% vs 64%로 더 정확.
 # 가볍게 가려면 base로 바꾸면 되고 코드 변경은 필요 없음. 비교 수치는 docs/progress.md 2026-08-22 참고
@@ -117,9 +119,10 @@ def forced_align_syllables(
         [(max(0.0, s.start * frame_duration - ONSET_LAG_SEC), s.end * frame_duration) for s in spans],
     )
     audio_end = waveform.shape[-1] / sample_rate
+    end = speech_end(waveform.squeeze(0).numpy(), sample_rate, after=raw[-1]["start"])
     return [
         {**seg, "start": round(seg["start"], 3), "end": round(seg["end"], 3)}
-        for seg in extend_spans(raw, audio_end)
+        for seg in extend_spans(raw, audio_end, end)
     ]
 
 
@@ -132,13 +135,16 @@ def group_spans(syllables: list[str], tokens: list[tuple[int, str]], spans: list
     return grouped
 
 
-def extend_spans(spans: list[dict], audio_end: float) -> list[dict]:
+def extend_spans(spans: list[dict], audio_end: float, speech_end_time: float | None = None) -> list[dict]:
     # CTC는 음절을 1~2프레임(20~40ms)짜리 스파이크로만 내놓아 span 길이가 실제 음절 길이가 아님.
     # AI-Hub 검증(scripts/validate_alignment.py)에서 onset은 MFA와 중앙값 29ms로 맞았으므로
-    # 각 음절의 끝을 다음 음절 onset까지 늘려 실제 길이에 가깝게 만든다.
+    # 각 음절의 끝을 다음 음절 onset까지 늘려 실제 길이에 가깝게 만든다. 마지막 음절은 intensity 기반
+    # 발화 끝(speech_end_time)을 쓰고, 없으면 앞 음절들의 중앙값 길이로 채운다.
     extended = [{**seg, "end": nxt["start"]} for seg, nxt in zip(spans[:-1], spans[1:])]
     last = spans[-1]
-    if extended:
+    if speech_end_time is not None and speech_end_time > last["start"]:
+        last = {**last, "end": min(audio_end, max(last["end"], speech_end_time))}
+    elif extended:
         durations = sorted(seg["end"] - seg["start"] for seg in extended)
         typical = durations[len(durations) // 2]
         last = {**last, "end": min(audio_end, max(last["end"], last["start"] + typical))}
