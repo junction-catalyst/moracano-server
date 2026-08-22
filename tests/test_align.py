@@ -1,10 +1,32 @@
 import pytest
 
-from moracano_ai.align import extend_spans, prompt_syllables
+from moracano_ai.align import extend_spans, group_spans, prompt_syllables, prompt_tokens, syllable_jamo
 
 
 def test_prompt_syllables_drops_whitespace():
     assert prompt_syllables("뭐라 카노") == ["뭐", "라", "카", "노"]
+
+
+def test_syllable_jamo_decomposes_with_optional_coda():
+    assert syllable_jamo("뭐") == ["ㅁ", "ㅝ"]
+    assert syllable_jamo("쫌") == ["ㅉ", "ㅗ", "ㅁ"]
+    assert syllable_jamo("값") == ["ㄱ", "ㅏ", "ㅄ"]
+
+
+def test_prompt_tokens_uses_syllables_for_syllable_vocab_and_jamo_otherwise():
+    syllable_vocab = {"뭐": 0, "라": 1}
+    assert prompt_tokens(["뭐", "라"], syllable_vocab) == [(0, "뭐"), (1, "라")]
+    jamo_vocab = {"ㄱ": 0}
+    assert prompt_tokens(["뭐", "라"], jamo_vocab) == [(0, "ㅁ"), (0, "ㅝ"), (1, "ㄹ"), (1, "ㅏ")]
+
+
+def test_group_spans_merges_jamo_spans_into_syllables():
+    tokens = [(0, "ㅁ"), (0, "ㅝ"), (1, "ㄹ"), (1, "ㅏ")]
+    spans = [(0.10, 0.12), (0.14, 0.16), (0.30, 0.32), (0.36, 0.38)]
+    assert group_spans(["뭐", "라"], tokens, spans) == [
+        {"text": "뭐", "start": 0.10, "end": 0.16},
+        {"text": "라", "start": 0.30, "end": 0.38},
+    ]
 
 
 def test_extend_spans_fills_gaps_to_next_onset():

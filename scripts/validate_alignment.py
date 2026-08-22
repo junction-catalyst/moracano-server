@@ -169,13 +169,14 @@ def main() -> int:
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--out", default="scripts/out")
+    ap.add_argument("--model", default=None)
     args = ap.parse_args()
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     rows = pick_samples(load_corpus_meta(), args.n, args.seed)
     utts = load_json_utts({r["stem"] for r in rows})
-    model, processor = load_aligner()
+    model, processor = load_aligner(args.model) if args.model else load_aligner()
     model.to(args.device)
     vocab = processor.tokenizer.get_vocab()
 
