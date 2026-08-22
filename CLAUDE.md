@@ -27,7 +27,8 @@ JunctionX Korea 2026 · 경상북도 방언 Dialect Root 플랫폼의 백엔드/
 
 ## Progress Log
 
-- Keep a running log of work in `docs/progress.md`.
+- Keep a running log of work in `docs/progress.md` — AI 분석 파이프라인 작업은 대신
+  `docs/ai/progress.md`에 남긴다(현재 AI 쪽 작업은 마무리돼 새 항목이 드물 것).
 - One dated section per work session (`## YYYY-MM-DD — short title`), newest at the bottom.
 - Each entry: what was done, key results (tables/numbers where relevant), and a `### Next` list of
   what's left. This is the backup of "what Claude did" across sessions — write it so a fresh session

@@ -1,8 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+artifacts/
+scripts/out/
 .env
 .env.*
 !.env.example
-__pycache__/
-*.pyc
-.venv/
 node_modules/
 .DS_Store

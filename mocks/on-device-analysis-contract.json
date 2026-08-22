@@ -1,77 +1,72 @@
 {
-  "description": "iOS 온디바이스 분석 모듈의 순수 출력 계약.",
+  "description": "iOS 온디바이스 분석 모듈의 순수 출력 계약. 아래 output은 지어낸 값이 아니라 tests/fixtures/parity/sample.wav('뭐라카노' TTS)를 실제 파이프라인(Kkonjeong/wav2vec2-base-korean, scripts/export_parity_fixtures.py)으로 돌린 진짜 출력을 그대로 옮김. ⚠️ TTS 음성이라 실제 방언 발화 검증은 아님 — 진짜 AI-Hub 방언 40개 fixture는 재배포 금지라 서버 artifacts/parity/py_fp32/에만 있음(필요하면 요청).",
   "input": {
-    "audio": "iOS 로컬 녹음 파일",
+    "audio": "iOS 로컬 녹음 파일 (이 예시는 tests/fixtures/parity/sample.wav)",
     "prompt": "뭐라카노"
   },
-  "output_samples": [
-    {
-      "case": "강한 방언 — 상승 억양 + 리듬 변동 큼",
-      "avg_pitch": 245.8,
-      "pitch_std": 58.3,
-      "avg_duration": 0.21,
-      "duration_std": 0.09,
-      "labels": ["Rising Intonation", "Strong Rhythm Variation"],
-      "pca_coord": [0.62, -0.35],
-      "syllables": [
-        { "text": "뭐", "start": 0.00, "end": 0.18, "pitch_trend": "flat" },
-        { "text": "라", "start": 0.18, "end": 0.34, "pitch_trend": "flat" },
-        { "text": "카", "start": 0.34, "end": 0.61, "pitch_trend": "falling" },
-        { "text": "노", "start": 0.61, "end": 0.79, "pitch_trend": "rising" }
-      ],
-      "haptic_pattern": {
-        "Version": 1,
-        "Pattern": [
-          { "Event": { "EventType": "HapticContinuous", "Time": 0.00, "EventDuration": 0.18,
-              "EventParameters": [
-                {"ParameterID": "HapticIntensity", "ParameterValue": 0.4},
-                {"ParameterID": "HapticSharpness", "ParameterValue": 0.3}
-              ] } },
-          { "Event": { "EventType": "HapticContinuous", "Time": 0.18, "EventDuration": 0.16,
-              "EventParameters": [
-                {"ParameterID": "HapticIntensity", "ParameterValue": 0.4},
-                {"ParameterID": "HapticSharpness", "ParameterValue": 0.3}
-              ] } },
-          { "Event": { "EventType": "HapticContinuous", "Time": 0.34, "EventDuration": 0.27,
-              "EventParameters": [
-                {"ParameterID": "HapticIntensity", "ParameterValue": 0.7},
-                {"ParameterID": "HapticSharpness", "ParameterValue": 0.5}
-              ] } },
-          { "ParameterCurve": { "ParameterID": "HapticIntensityControl", "Time": 0.34,
-              "ParameterCurveControlPoints": [
-                {"Time": 0.34, "ParameterValue": 0.7},
-                {"Time": 0.61, "ParameterValue": 0.5}
-              ] } },
-          { "Event": { "EventType": "HapticContinuous", "Time": 0.61, "EventDuration": 0.18,
-              "EventParameters": [
-                {"ParameterID": "HapticIntensity", "ParameterValue": 0.5},
-                {"ParameterID": "HapticSharpness", "ParameterValue": 0.6}
-              ] } },
-          { "ParameterCurve": { "ParameterID": "HapticIntensityControl", "Time": 0.61,
-              "ParameterCurveControlPoints": [
-                {"Time": 0.61, "ParameterValue": 0.5},
-                {"Time": 0.79, "ParameterValue": 0.9}
-              ] } }
-        ]
-      }
-    },
-    {
-      "case": "표준어에 가까움 — 변동 적음",
-      "avg_pitch": 198.2,
-      "pitch_std": 12.4,
-      "avg_duration": 0.15,
-      "duration_std": 0.02,
-      "labels": [],
-      "pca_coord": [0.04, 0.02]
-    },
-    {
-      "case": "장음 위주 — 억양보다 길이 특징이 강함",
-      "avg_pitch": 210.5,
-      "pitch_std": 20.1,
-      "avg_duration": 0.29,
-      "duration_std": 0.04,
-      "labels": ["Long Vowel Usage"],
-      "pca_coord": [-0.18, 0.47]
+  "output": {
+    "avg_pitch": 244.87,
+    "pitch_std": 35.04,
+    "pitch_range": 128.05,
+    "pitch_slope_end": 49.1,
+    "syllable_count": 4,
+    "avg_duration": 0.173,
+    "duration_std": 0.089,
+    "npvi": 113.74,
+    "speaking_rate": 5.76,
+    "labels": ["Rising Intonation", "Strong Rhythm Variation"],
+    "pca_coord": [0.449, 1.0],
+    "syllables": [
+      { "text": "뭐", "start": 0.001, "end": 0.145, "pitch_trend": "rising" },
+      { "text": "라", "start": 0.145, "end": 0.391, "pitch_trend": "rising" },
+      { "text": "카", "start": 0.391, "end": 0.432, "pitch_trend": "falling" },
+      { "text": "노", "start": 0.432, "end": 0.695, "pitch_trend": "rising" }
+    ],
+    "haptic_pattern": {
+      "Version": 1,
+      "Pattern": [
+        { "Event": { "EventType": "HapticContinuous", "Time": 0.001, "EventDuration": 0.144,
+            "EventParameters": [
+              {"ParameterID": "HapticIntensity", "ParameterValue": 0.63},
+              {"ParameterID": "HapticSharpness", "ParameterValue": 0.6}
+            ] } },
+        { "ParameterCurve": { "ParameterID": "HapticIntensityControl", "Time": 0.001,
+            "ParameterCurveControlPoints": [
+              {"Time": 0.001, "ParameterValue": 0.63},
+              {"Time": 0.145, "ParameterValue": 0.82}
+            ] } },
+        { "Event": { "EventType": "HapticContinuous", "Time": 0.145, "EventDuration": 0.246,
+            "EventParameters": [
+              {"ParameterID": "HapticIntensity", "ParameterValue": 0.87},
+              {"ParameterID": "HapticSharpness", "ParameterValue": 0.6}
+            ] } },
+        { "ParameterCurve": { "ParameterID": "HapticIntensityControl", "Time": 0.145,
+            "ParameterCurveControlPoints": [
+              {"Time": 0.145, "ParameterValue": 0.87},
+              {"Time": 0.391, "ParameterValue": 1.0}
+            ] } },
+        { "Event": { "EventType": "HapticContinuous", "Time": 0.391, "EventDuration": 0.041,
+            "EventParameters": [
+              {"ParameterID": "HapticIntensity", "ParameterValue": 0.39},
+              {"ParameterID": "HapticSharpness", "ParameterValue": 0.5}
+            ] } },
+        { "ParameterCurve": { "ParameterID": "HapticIntensityControl", "Time": 0.391,
+            "ParameterCurveControlPoints": [
+              {"Time": 0.391, "ParameterValue": 0.39},
+              {"Time": 0.432, "ParameterValue": 0.27}
+            ] } },
+        { "Event": { "EventType": "HapticContinuous", "Time": 0.432, "EventDuration": 0.263,
+            "EventParameters": [
+              {"ParameterID": "HapticIntensity", "ParameterValue": 0.91},
+              {"ParameterID": "HapticSharpness", "ParameterValue": 0.6}
+            ] } },
+        { "ParameterCurve": { "ParameterID": "HapticIntensityControl", "Time": 0.432,
+            "ParameterCurveControlPoints": [
+              {"Time": 0.432, "ParameterValue": 0.91},
+              {"Time": 0.695, "ParameterValue": 1.0}
+            ] } }
+      ]
     }
-  ]
+  },
+  "reference_distribution_note": "AI-Hub 경상도 실발화 600개(large 모델 기준, docs/progress.md 참고) 분포: avg_duration p50 0.180/p90 0.259, npvi p50 47/p90 67, avg_pitch 여 중앙값 195/남 117Hz. 라벨 임계값(src/moracano_ai/labels.py): rising 25 반음/s, long vowel 0.23s, npvi 76 — 전부 실측 p75~p90 기준."
 }
