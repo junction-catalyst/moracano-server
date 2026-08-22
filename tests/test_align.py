@@ -4,6 +4,7 @@ from moracano_ai.align import (
     extend_spans,
     group_spans,
     nearest_syllable,
+    normalize_prompt,
     prompt_syllables,
     prompt_tokens,
     syllable_jamo,
@@ -12,6 +13,11 @@ from moracano_ai.align import (
 
 def test_prompt_syllables_drops_whitespace():
     assert prompt_syllables("뭐라 카노") == ["뭐", "라", "카", "노"]
+
+
+def test_normalize_prompt_keeps_only_hangul_syllables():
+    assert normalize_prompt("뭐라 카노?!") == "뭐라카노"
+    assert normalize_prompt("abc 123 ...") == ""
 
 
 def test_syllable_jamo_decomposes_with_optional_coda():

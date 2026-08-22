@@ -39,6 +39,11 @@ JUNGSEONG = "ㅏㅐㅑㅒㅓㅔㅕㅖㅗㅘㅙㅚㅛㅜㅝㅞㅟㅠㅡㅢㅣ"
 JONGSEONG = [""] + list("ㄱㄲㄳㄴㄵㄶㄷㄹㄺㄻㄼㄽㄾㄿㅀㅁㅂㅄㅅㅆㅇㅈㅊㅋㅌㅍㅎ")
 
 
+def normalize_prompt(prompt: str) -> str:
+    # 제시어의 문장부호("뭐라카노?")·공백·숫자·영문은 음절이 아니라 정렬 대상에서 뺀다. 한글 완성형만 남김
+    return "".join(ch for ch in prompt if "가" <= ch <= "힣")
+
+
 def prompt_syllables(prompt: str) -> list[str]:
     # 한글 음절 블록은 유니코드 완성형 1글자 = 1음절이라 공백만 걷어내면 됨
     return [ch for ch in prompt if not ch.isspace()]
