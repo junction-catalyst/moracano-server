@@ -55,22 +55,23 @@ syllable timing, haptic feature를 추출하고, 그 결과를 `voices`에 저�
 
 ## 데이터 흐름
 
-```text
-AI-Hub / seed CSV
-        ↓
-표준어-방언 어절 alignment
-        ↓
-Supabase Postgres
-challenges · lemmas · variants · utterances
-        ↓
-iOS App
-challenge 조회 → 녹음 → 온디바이스 분석
-        ↓
-Supabase
-private audio 저장 · voices 분석 결과 저장
-        ↓
-Visualization
-지역별 표현 · 음성 특징 · PCA/label/haptic
+```mermaid
+flowchart TB
+    seed["AI-Hub / seed CSV"]
+    align["표준어-방언 어절 alignment"]
+    db[("Supabase Postgres<br/>challenges · lemmas · variants · utterances")]
+    app["iOS App<br/>challenge 조회 · 녹음"]
+    analysis["On-device analysis<br/>pitch · duration · rhythm · syllables"]
+    storage[("Private Storage<br/>voice audio")]
+    voices[("voices<br/>analysis result")]
+    visual["Visualization<br/>지역별 표현 · 음성 특징 · PCA/label/haptic"]
+
+    seed --> align --> db --> app
+    app --> storage
+    app --> analysis --> voices
+    db --> visual
+    voices --> visual
+    storage -. "pre-signed URL" .-> visual
 ```
 
 ## 주요 테이블
