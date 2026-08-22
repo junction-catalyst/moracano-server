@@ -63,7 +63,21 @@ create table if not exists voices (
   created_at     timestamptz not null default now()
 );
 
-alter table voices add column if not exists owner_id uuid references auth.users(id);
+alter table voices add column if not exists owner_id uuid;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'voices_owner_id_fkey'
+      and conrelid = 'public.voices'::regclass
+  ) then
+    alter table public.voices
+      add constraint voices_owner_id_fkey
+      foreign key (owner_id) references auth.users(id);
+  end if;
+end $$;
 
 -- ── Lexicon ──────────────────────────────────────────────────
 -- lemmas는 표준어 표제어 전역 사전이다. 지역성은 variants/utterances가 담당한다.
@@ -134,6 +148,10 @@ alter table variants           enable row level security;
 alter table utterances         enable row level security;
 alter table utterance_variants enable row level security;
 alter table exposures          enable row level security;
+
+revoke all on table voices from anon;
+revoke all on table voices from authenticated;
+grant select, insert, update on table voices to authenticated;
 
 create policy "public read regions"    on regions    for select using (true);
 create policy "public read dialect regions" on dialect_regions for select using (true);
@@ -211,5 +229,24 @@ create policy "authenticated read own voice objects"
   to authenticated
   using (
     bucket_id = 'voices'
-    and owner_id = (select auth.uid()::text)
+    and (
+      owner_id = (select auth.uid()::text)
+      or (storage.foldername(name))[1] = (select auth.uid()::text)
+    )
+  );
+
+drop policy if exists "authenticated update own voice objects" on storage.objects;
+create policy "authenticated update own voice objects"
+  on storage.objects for update
+  to authenticated
+  using (
+    bucket_id = 'voices'
+    and (
+      owner_id = (select auth.uid()::text)
+      or (storage.foldername(name))[1] = (select auth.uid()::text)
+    )
+  )
+  with check (
+    bucket_id = 'voices'
+    and (storage.foldername(name))[1] = (select auth.uid()::text)
   );

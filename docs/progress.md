@@ -108,3 +108,33 @@ lexicon 구조를 분리했다.
   `utterance_variants=116`, `dialect_regions=1`.
 - publishable key로 `dialect_regions` 조회 확인.
 - Supabase security advisor: lint 없음.
+
+## 2026-08-23 — 라이브 Supabase `voices.owner_id`/RLS 보정
+
+프론트에서 `signInAnonymously()`와 `voices.owner_id` 기반 녹음 플로우를 붙이는 과정에서, 레포의
+`docs/schema.sql`에는 반영돼 있던 소유권 스키마가 라이브 Supabase DB에는 적용되지 않은 것을 확인했다.
+
+- **확인된 문제**:
+  - Auth API `POST /auth/v1/signup {}` 응답이 `anonymous_provider_disabled`로 반환됨.
+  - 라이브 `public.voices`에는 `owner_id` 컬럼이 없었고, Data API도
+    `column voices.owner_id does not exist`를 반환함.
+  - `voices`는 RLS가 켜져 있었지만 정책이 0개라 insert/select/update가 모두 막힘.
+  - `storage.objects`에는 private `voices` bucket object를 owner 기준으로 읽고 쓰는 정책이 없었음.
+- **라이브 DB 적용**:
+  - `voices.owner_id uuid` 컬럼과 `voices_owner_id_fkey`를 추가했다. 기존 healthcheck row 보존을 위해
+    nullable로 유지했다.
+  - `idx_voices_owner` 인덱스를 추가했다.
+  - `anon`/`authenticated`의 기존 `voices` broad grant를 회수하고, `authenticated`에
+    `select/insert/update`만 다시 grant했다.
+  - `users read own voices`, `users insert own voices`, `users update own voice analysis` 정책을 적용했다.
+  - `storage.objects`에 `authenticated upload/read/update own voice objects` 정책을 적용했다.
+- **검증**:
+  - Data API의 `voices.owner_id` 조회가 더 이상 `42703 column does not exist`를 반환하지 않음.
+  - unauthenticated publishable-key `voices` 조회/insert는 `42501 permission denied/RLS`로 차단됨.
+  - Supabase security advisor: lint 없음.
+  - performance advisor: 새/기존 인덱스 사용 전이라 `unused_index` INFO만 남음.
+- **남은 작업**:
+  - Anonymous Sign-Ins는 Postgres SQL이 아니라 Auth service config라서 Dashboard에서 켜야 한다.
+    Management API 경로는 `PATCH /v1/projects/{ref}/config/auth` +
+    `{"external_anonymous_users_enabled": true}`이지만, 현재 전달된 `sbp_...` token은 이 endpoint에서
+    `403 error code: 1010`을 반환했다.
