@@ -86,7 +86,9 @@
   방향을 실제 진동 램프로 표현
 - 목데이터: `mocks/analyze-response-with-syllables.json`
 
-### ⚠️ 확인 필요
+### 확정 사항
 
-웹앱인지 네이티브 앱인지에 따라 실현 가능성이 다름 — Safari는 Web Vibration API 자체를 지원하지
-않아 웹앱이면 iOS 사용자는 햅틱을 못 느낌. 팀과 플랫폼 확정 필요.
+- 플랫폼: iOS 네이티브. Core Haptics 사용 가능하므로 Web Vibration API 제약 없음.
+- 프론트 확인 완료: AHAP 포맷 그대로 `CHHapticPattern(dictionary:)`에 넣는 구조로 합의됨.
+  → `haptic_pattern` 필드는 위 AHAP 구조(`Version`/`Pattern`/`Event`/`ParameterCurve`) 그대로
+  내려주면 되고, 프론트 쪽 별도 파싱 코드 불필요.
