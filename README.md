@@ -51,130 +51,26 @@ syllable timing, haptic feature를 추출하고, 그 결과를 `voices`에 저�
 
 ## ERD
 
-```mermaid
-erDiagram
-    regions ||--o{ voices : "user selected region"
-    challenges ||--o{ voices : "recorded challenge"
-
-    dialect_regions ||--o{ variants : "source region"
-    dialect_regions ||--o{ utterances : "source region"
-    dialect_regions ||--o{ dialect_regions : "parent"
-
-    lemmas ||--o{ variants : "standard form"
-    variants ||--o{ utterance_variants : "appears in"
-    utterances ||--o{ utterance_variants : "contains"
-    utterances ||--o{ exposures : "shown to user"
-
-    regions {
-        text code PK
-        text name
-    }
-
-    dialect_regions {
-        text code PK
-        text name
-        text level
-        text parent_code FK
-    }
-
-    challenges {
-        bigint id PK
-        text prompt_text
-        smallint syllable_count
-        int variant_count
-        int region_count
-        date active_date
-    }
-
-    voices {
-        uuid id PK
-        uuid owner_id FK
-        bigint challenge_id FK
-        text region_code FK
-        text audio_path
-        text status
-        numeric avg_pitch
-        numeric pitch_std
-        numeric avg_duration
-        numeric duration_std
-        text_array labels
-        numeric_array pca_coord
-        jsonb syllables
-        jsonb haptic_pattern
-    }
-
-    lemmas {
-        bigint id PK
-        text standard_form
-        text gloss
-        int aihub_count
-        int user_count
-    }
-
-    variants {
-        bigint id PK
-        bigint lemma_id FK
-        text surface
-        text region_code FK
-        int aihub_count
-        int user_count
-    }
-
-    utterances {
-        bigint id PK
-        text source
-        text region_code FK
-        text dialect_text
-        text standard_text
-        int syllable_count
-        numeric dialect_density
-    }
-
-    utterance_variants {
-        bigint utterance_id FK
-        bigint variant_id FK
-    }
-
-    exposures {
-        text user_key PK
-        bigint utterance_id FK
-        timestamptz shown_at
-    }
-```
+![Supabase schema ERD](docs/server/supabase-schema-nuofcxkxoaahnofytckg.png)
 
 ## 데이터 흐름
 
-```mermaid
-flowchart LR
-    subgraph Seed["AI-Hub / curated seed data"]
-        CSV["challenge_sentences CSV"]
-        Align["Utterance alignment\nstandard text -> dialect surface"]
-        Lexicon["lemmas / variants"]
-        Examples["utterances"]
-    end
-
-    subgraph Supabase["Supabase"]
-        DB[("Postgres\nregions · challenges · dialect_regions\nlemmas · variants · utterances · voices")]
-        ST[("Storage private bucket\nvoices")]
-    end
-
-    subgraph App["iOS App"]
-        Auth["Anonymous Auth"]
-        Challenge["Challenge select"]
-        Record["m4a/aac recording"]
-        Analyze["On-device analysis\npitch · duration · rhythm · syllables · PCA · haptics"]
-        Visualize["Result visualization"]
-    end
-
-    CSV --> Align --> Lexicon --> DB
-    Align --> Examples --> DB
-    Auth --> Challenge --> DB
-    Challenge --> Record
-    Record -->|upload owner_id/voice_id.m4a| ST
-    Record --> Analyze
-    Analyze -->|update voices analysis fields| DB
-    DB --> Visualize
-    ST -->|short-lived pre-signed URL for replay| Visualize
+```text
+AI-Hub / seed CSV
+        ↓
+표준어-방언 어절 alignment
+        ↓
+Supabase Postgres
+challenges · lemmas · variants · utterances
+        ↓
+iOS App
+challenge 조회 → 녹음 → 온디바이스 분석
+        ↓
+Supabase
+private audio 저장 · voices 분석 결과 저장
+        ↓
+Visualization
+지역별 표현 · 음성 특징 · PCA/label/haptic
 ```
 
 ## 주요 테이블
