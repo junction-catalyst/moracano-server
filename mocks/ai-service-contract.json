@@ -1,0 +1,77 @@
+{
+  "description": "AI 분석 마이크로서비스의 순수 입출력 계약. voice_id/region/prompt/status는 백엔드 소유라 여기 없음 — prompt는 강제정렬 입력으로만 받음.",
+  "input": {
+    "audio": "오디오 파일(bytes 또는 백엔드가 준 임시 URL)",
+    "prompt": "뭐라카노"
+  },
+  "output_samples": [
+    {
+      "case": "강한 방언 — 상승 억양 + 리듬 변동 큼",
+      "avg_pitch": 245.8,
+      "pitch_std": 58.3,
+      "avg_duration": 0.21,
+      "duration_std": 0.09,
+      "labels": ["Rising Intonation", "Strong Rhythm Variation"],
+      "pca_coord": [0.62, -0.35],
+      "syllables": [
+        { "text": "뭐", "start": 0.00, "end": 0.18, "pitch_trend": "flat" },
+        { "text": "라", "start": 0.18, "end": 0.34, "pitch_trend": "flat" },
+        { "text": "카", "start": 0.34, "end": 0.61, "pitch_trend": "falling" },
+        { "text": "노", "start": 0.61, "end": 0.79, "pitch_trend": "rising" }
+      ],
+      "haptic_pattern": {
+        "Version": 1,
+        "Pattern": [
+          { "Event": { "EventType": "HapticContinuous", "Time": 0.00, "EventDuration": 0.18,
+              "EventParameters": [
+                {"ParameterID": "HapticIntensity", "ParameterValue": 0.4},
+                {"ParameterID": "HapticSharpness", "ParameterValue": 0.3}
+              ] } },
+          { "Event": { "EventType": "HapticContinuous", "Time": 0.18, "EventDuration": 0.16,
+              "EventParameters": [
+                {"ParameterID": "HapticIntensity", "ParameterValue": 0.4},
+                {"ParameterID": "HapticSharpness", "ParameterValue": 0.3}
+              ] } },
+          { "Event": { "EventType": "HapticContinuous", "Time": 0.34, "EventDuration": 0.27,
+              "EventParameters": [
+                {"ParameterID": "HapticIntensity", "ParameterValue": 0.7},
+                {"ParameterID": "HapticSharpness", "ParameterValue": 0.5}
+              ] } },
+          { "ParameterCurve": { "ParameterID": "HapticIntensityControl", "Time": 0.34,
+              "ParameterCurveControlPoints": [
+                {"Time": 0.34, "ParameterValue": 0.7},
+                {"Time": 0.61, "ParameterValue": 0.5}
+              ] } },
+          { "Event": { "EventType": "HapticContinuous", "Time": 0.61, "EventDuration": 0.18,
+              "EventParameters": [
+                {"ParameterID": "HapticIntensity", "ParameterValue": 0.5},
+                {"ParameterID": "HapticSharpness", "ParameterValue": 0.6}
+              ] } },
+          { "ParameterCurve": { "ParameterID": "HapticIntensityControl", "Time": 0.61,
+              "ParameterCurveControlPoints": [
+                {"Time": 0.61, "ParameterValue": 0.5},
+                {"Time": 0.79, "ParameterValue": 0.9}
+              ] } }
+        ]
+      }
+    },
+    {
+      "case": "표준어에 가까움 — 변동 적음 (syllables/haptic_pattern 구조는 위와 동일, 값만 평탄)",
+      "avg_pitch": 198.2,
+      "pitch_std": 12.4,
+      "avg_duration": 0.15,
+      "duration_std": 0.02,
+      "labels": [],
+      "pca_coord": [0.04, 0.02]
+    },
+    {
+      "case": "장음 위주 — 억양보다 길이 특징이 강함 (syllables/haptic_pattern 구조는 위와 동일)",
+      "avg_pitch": 210.5,
+      "pitch_std": 20.1,
+      "avg_duration": 0.29,
+      "duration_std": 0.04,
+      "labels": ["Long Vowel Usage"],
+      "pca_coord": [-0.18, 0.47]
+    }
+  ]
+}

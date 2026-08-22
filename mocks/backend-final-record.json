@@ -1,0 +1,41 @@
+{
+  "description": "Supabase voices 테이블 + AI 출력을 합쳐 프론트로 서빙하는 최종 레코드 예시. voice_id/region/prompt/status는 백엔드 소유(업로드·추천 시점에 이미 확정), 나머지는 ai-service-contract.json의 output을 그대로 병합.",
+  "record": {
+    "voice_id": "mock-voice-001",
+    "region": "포항",
+    "prompt": "뭐라카노",
+    "status": "done",
+    "avg_pitch": 245.8,
+    "pitch_std": 58.3,
+    "avg_duration": 0.21,
+    "duration_std": 0.09,
+    "labels": ["Rising Intonation", "Strong Rhythm Variation"],
+    "pca_coord": [0.62, -0.35],
+    "syllables": [
+      { "text": "뭐", "start": 0.00, "end": 0.18, "pitch_trend": "flat" },
+      { "text": "라", "start": 0.18, "end": 0.34, "pitch_trend": "flat" },
+      { "text": "카", "start": 0.34, "end": 0.61, "pitch_trend": "falling" },
+      { "text": "노", "start": 0.61, "end": 0.79, "pitch_trend": "rising" }
+    ],
+    "haptic_pattern": {
+      "Version": 1,
+      "Pattern": [
+        { "Event": { "EventType": "HapticContinuous", "Time": 0.00, "EventDuration": 0.18,
+            "EventParameters": [
+              {"ParameterID": "HapticIntensity", "ParameterValue": 0.4},
+              {"ParameterID": "HapticSharpness", "ParameterValue": 0.3}
+            ] } },
+        { "Event": { "EventType": "HapticContinuous", "Time": 0.61, "EventDuration": 0.18,
+            "EventParameters": [
+              {"ParameterID": "HapticIntensity", "ParameterValue": 0.5},
+              {"ParameterID": "HapticSharpness", "ParameterValue": 0.6}
+            ] } },
+        { "ParameterCurve": { "ParameterID": "HapticIntensityControl", "Time": 0.61,
+            "ParameterCurveControlPoints": [
+              {"Time": 0.61, "ParameterValue": 0.5},
+              {"Time": 0.79, "ParameterValue": 0.9}
+            ] } }
+      ]
+    }
+  }
+}

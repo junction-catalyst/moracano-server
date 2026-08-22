@@ -44,33 +44,66 @@ JunctionX Korea 2026 · moracano(경상북도 방언 Dialect Root) 프로젝트�
 - 충청도 관련 요소는 이 프로젝트 범위에 없음(이전 "경상도 vs 충청도 대결" 버전의 잔재였음, 삭제 확인됨) —
   경북 내부 시군 다양성에만 집중.
 
-## 2026-08-22 — Supabase 프로젝트 생성 및 초기 스키마 적용
+## 2026-08-22 — 서버 데이터 실사 + 스코프 조정
 
-Supabase 프로젝트(`junction`, ref `nuofcxkxoaahnofytckg`, region `ap-northeast-2`)를 생성하고, 확정된
-API 명세(Challenge/Voice/Analysis/Dialect Root/Archive·Map/Lexicon 6도메인)에 맞춰 초기 스키마를
-Management API로 직접 적용했다.
+팀 GPU 서버에 이미 받아둔 AI-Hub "한국어 방언 발화 데이터(경상도, datasetKey 119)"를 실제로 확인한 결과,
+지역 메타데이터가 **광역 단위(부산/대구/울산/경남/경북)까지만** 있고 시군(포항/안동/경주 등) 단위가 없음을
+확인했다. 경북 출생 화자 발화량도 현재 다운로드분 기준 약 245시간으로 전체의 일부에 불과.
 
-- **스키마 파일**: `docs/schema.sql`. 테이블 8개 — `regions`, `challenges`, `voices`, `lemmas`,
+- **Similar Voices 기능 제거 (팀 결정)**: 기획서(`docs/spec.md`, 결과 예시 섹션)엔 "Similar Voices:
+  Yeongdeok, Gyeongju"로 명시돼 있었으나, 시군 단위 데이터가 없어 구현 불가능함을 확인 후 팀 논의를 거쳐
+  MVP에서 제외하기로 결정. `mocks/analyze-response-samples.json`,
+  `mocks/analyze-response-with-syllables.json`에서 `similar_regions` 필드 삭제.
+- **음절 타이밍 방식 재검토**: 에너지 피크 기반 음절 분할은 정합성이 약하다는 문제 제기 → ASR(Whisper)
+  대신 **강제정렬(forced alignment)**로 전환 검토 중 (제시어 텍스트를 이미 아니까, 사전학습 한국어
+  wav2vec2 CTC 모델 + `torchaudio` 강제정렬로 텍스트-오디오 시간 매핑만 수행, 전사/학습 불필요). 서버에
+  이미 있는 MFA 정렬 결과물과 같은 계열의 접근.
+- **온디바이스(CoreML) 검토 후 보류**: wav2vec2→CoreML 변환 자체는 반나절~하루면 되지만, CTC 강제정렬
+  알고리즘을 Swift로 재구현하고 오디오 전처리를 동일하게 맞추는 작업까지 합치면 2~3일이 걸려 3일
+  해커톤 스코프를 넘음. 서버(Docker, 모델 상시 로드) 방식으로 진행하기로 함.
+- **Voice Experience용 syllables 필드 추가 확정**: `text`/`start`/`end`/`pitch_trend`/`haptic`(AHAP
+  포맷) 구조로 프론트(iOS, Core Haptics)와 합의 완료. `haptic`은 `CHHapticPattern(dictionary:)`에 바로
+  넣을 수 있는 AHAP 구조(Version/Pattern/Event/ParameterCurve) 그대로 사용.
+
+### Next
+
+- 강제정렬 파이프라인(wav2vec2 CTC + torchaudio forced_align) 프로토타입 작성, parselmouth 설치.
+- 서버에 이미 있는 MFA 결과물(`mfa_work/`)을 레퍼런스 코퍼스 전처리에 재사용할 수 있는지 확인.
+- Similar Voices를 완전히 뺄지, 광역 단위(경북 vs 타 시도)로 축소해서 부활시킬지는 추가 논의 여지 있음
+  — 지금은 제거 상태로 진행.
+
+## 2026-08-22 — Supabase 프로젝트 생성 및 스키마 적용 (위 스코프 조정 반영)
+
+Supabase 프로젝트(`junction`, ref `nuofcxkxoaahnofytckg`, region `ap-northeast-2`)를 생성하고,
+`mocks/backend-final-record.json`·`mocks/ai-service-contract.json` 계약에 맞춰 스키마를 Management API로
+직접 적용했다. 최초 적용본은 그 직전 세션(위 "서버 데이터 실사" 항목)과 별개로 진행되고 있었어서
+`similar_regions`/`pca_x`·`pca_y` 형태로 만들었다가, origin/dev를 머지하며 위 변경사항(Similar Voices
+제거, syllables·haptic_pattern 추가)을 뒤늦게 확인하고 즉시 재수정했다.
+
+- **스키마 파일**: `docs/schema.sql` (v2). 테이블 8개 — `regions`, `challenges`, `voices`, `lemmas`,
   `variants`, `utterances`, `utterance_variants`, `exposures`.
-- **`voices` 테이블에 분석 결과를 직접 저장**한다(별도 `prosody_features` 테이블 없음) —
-  `mocks/analyze-response-samples.json`과 동일 필드(`avg_pitch`, `pitch_std`, `avg_duration`,
-  `duration_std`, `labels`, `similar_regions`, `pca_x`/`pca_y`, `status`). `POST /voices/{id}/analyze`가
-  이 행을 UPDATE하는 구조로 API 명세와 1:1 대응.
-- **RLS**: 공개 데이터(`regions`/`challenges`/`lemmas`/`variants`/`utterances`)는 읽기 전용 공개 정책.
-  `voices`/`exposures`는 익명 INSERT 허용(무로그인 설계). 분석 결과 UPDATE는 별도 정책 없음 —
-  Python 서버가 `sb_secret_...`(service_role 계열) 키로 RLS를 우회해 직접 쓴다.
-- **`regions` 시딩 완료**: 경상북도 23개 시군(포항·경주·김천·안동·구미·영주·영천·상주·문경·경산·
-  군위·의성·청송·영양·영덕·청도·고령·성주·칠곡·예천·봉화·울진·울릉) 전체 삽입, count 23 확인.
+- **`voices`가 `backend-final-record.json`과 1:1 대응**: `avg_pitch`/`pitch_std`/`avg_duration`/
+  `duration_std`/`labels`/`pca_coord`(numeric[])/`syllables`(jsonb)/`haptic_pattern`(jsonb, AHAP 그대로).
+  `similar_regions`는 넣지 않음. `POST /voices/{id}/analyze`가 이 행을 UPDATE.
+- **지역 필드 이원화**: `voices.region_code`만 `regions`(경북 23개 시군, 사용자가 지도 UX에서 직접
+  선택)를 참조하는 FK다. `lemmas`/`variants`/`utterances.region_code`는 **FK 없는 자유 텍스트**로 바꿨다
+  — AI-Hub 원본이 시군이 아니라 광역 단위(경북/경남/부산/대구/울산)까지만 주기 때문에, 23개 시군 코드와
+  매칭이 안 된다. `sub_region` 컬럼은 세 테이블 모두에서 제거(항상 NULL이 될 게 뻔해서).
+- **RLS**: 공개 데이터는 읽기 전용 공개. `voices`/`exposures`는 익명 INSERT 허용(무로그인 설계). 분석
+  결과 UPDATE는 별도 정책 없음 — Python 서버가 `sb_secret_...`(service_role 계열) 키로 RLS를 우회.
+- **`regions` 시딩 완료**: 경상북도 23개 시군 전체 삽입, count 23 확인. 이 테이블은 스키마 재작업 중에도
+  건드리지 않았다.
 - **키 3종 정리**: `SUPABASE_PUBLISHABLE_KEY`(iOS 앱에 그대로 심는 공개 키), `SUPABASE_SECRET_KEY`
-  (서버 전용, RLS 우회), `SUPABASE_ACCESS_TOKEN`(Management API용 `sbp_...` — **계정 전체 프로젝트에
-  접근 가능**하므로 스키마 변경 등 1회성 작업에만 쓰고 상시 보관하지 않는 게 안전). 전부 `.env`에만
+  (서버 전용, RLS 우회), `SUPABASE_ACCESS_TOKEN`(Management API `sbp_...` — **계정의 다른 프로젝트에도
+  접근 가능**함을 실제 확인함, 1회성 스키마 작업에만 쓰고 상시 보관하지 않는 게 안전). 전부 `.env`에만
   존재, `.gitignore`로 추적 제외 확인.
 
 ### Next
 
-- ⚠️ **mock 샘플의 `region: "대구"`가 실제 `regions` 시딩과 불일치** — 대구는 광역시라 경북 23개
-  시군에 포함되지 않음. mock을 경북 시군으로 교체하거나, "인접 문화권" 참고 데이터로 별도 처리할지
-  결정 필요.
+- ⚠️ **"개발 확정안"(Notion) 문서의 Challenge 선정 SQL이 무효화됨** — `count(distinct sub_region)`으로
+  "여러 시군에서 다르게 말한 문장"을 고르는 쿼리를 제안했었는데, AI-Hub에 시군 라벨이 없어 그대로 못 씀.
+  광역 단위 필터로 축소하거나, Challenge 50개를 수작업 큐레이션으로 전환할지 결정 필요 — Notion 갱신 필요.
 - Storage 버킷(`voices`) 생성 + 업로드 정책 설정 — 아직 미적용.
-- AI-Hub 라벨로 `lemmas`/`variants`/`utterances` 실데이터 적재 (현재는 스키마만 있고 데이터는 비어있음).
+- AI-Hub 라벨/강제정렬 파이프라인 출력으로 `lemmas`/`variants`/`utterances`/`voices` 실데이터 적재
+  (현재는 스키마만 있고 데이터는 비어있음, `regions` 제외).
 - 라벨 임계값·PCA 변환행렬 사전 피팅 스크립트 작성 (이전 항목에서 이월).
