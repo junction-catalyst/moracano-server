@@ -8,9 +8,9 @@
 --     MVP에서 빠짐 — docs/progress.md "2026-08-22 — 서버 데이터 실사 + 스코프 조정" 참고)
 --   - pca_x/pca_y → pca_coord numeric[] (계약의 [x, y] 배열 형태 그대로)
 --   - syllables jsonb, haptic_pattern jsonb 추가 (강제정렬 음절 타이밍 + AHAP 햅틱 패턴)
---   - lemmas/variants/utterances.region_code에서 regions FK 제거: AI-Hub는 광역 단위(경북/경남/
---     부산/대구/울산)까지만 제공하고 시군 단위가 없어, 23개 시군 코드와 매칭되지 않음. 자유 텍스트로
---     남겨두고 voices.region_code(사용자가 앱에서 직접 고른 시군)만 regions를 참조.
+--   - seed 데이터의 출처 지역은 dialect_regions로 분리. voices.region_code는 사용자가 앱에서 직접
+--     고른 시군(regions)을 참조하고, variants/utterances.region_code는 AI-Hub/seed 출처 지역
+--     dialect_regions를 참조한다.
 
 create extension if not exists pgcrypto;
 
@@ -19,6 +19,15 @@ create extension if not exists pgcrypto;
 create table if not exists regions (
   code text primary key,       -- '포항'
   name text not null           -- '포항시'
+);
+
+-- AI-Hub/seed 데이터의 출처 지역. 광역 태그(GB)와 향후 시군 단위 태그를 함께 담는다.
+create table if not exists dialect_regions (
+  code        text primary key,       -- 'GB', '포항', '경주'
+  name        text not null,          -- '경북', '포항시', '경주시'
+  level       text not null check (level in ('province','city')),
+  parent_code text references dialect_regions(code),
+  created_at  timestamptz not null default now()
 );
 
 -- ── Challenge ────────────────────────────────────────────────
@@ -57,12 +66,11 @@ create table if not exists voices (
 alter table voices add column if not exists owner_id uuid references auth.users(id);
 
 -- ── Lexicon ──────────────────────────────────────────────────
--- region_code는 AI-Hub 원 데이터의 광역 단위 태그(예: '경북')를 위한 자유 텍스트 — FK 없음.
+-- lemmas는 표준어 표제어 전역 사전이다. 지역성은 variants/utterances가 담당한다.
 create table if not exists lemmas (
   id            bigserial primary key,
   standard_form text not null unique,   -- AI-Hub eojeolList.standard로 묶은 표제어
   gloss         text,
-  region_code   text,
   aihub_count   int default 0,
   user_count    int default 0
 );
@@ -71,7 +79,7 @@ create table if not exists variants (
   id           bigserial primary key,
   lemma_id     bigint references lemmas(id) on delete cascade,
   surface      text not null,           -- 실제 방언 표면형 ("뿌리 갈래")
-  region_code  text,
+  region_code  text references dialect_regions(code), -- 방언 표현 출처 지역
   aihub_count  int default 0,
   user_count   int default 0,
   unique (lemma_id, surface, region_code)
@@ -79,8 +87,8 @@ create table if not exists variants (
 
 create table if not exists utterances (
   id              bigserial primary key,
-  source          text not null check (source in ('aihub','user')),
-  region_code     text,
+  source          text not null check (source in ('aihub','user','synthetic')),
+  region_code     text references dialect_regions(code), -- 원문/예시 발화 출처 지역
   dialect_text    text not null,
   standard_text   text not null,
   syllable_count  int,
@@ -105,13 +113,20 @@ create table if not exists exposures (
 create index if not exists idx_voices_challenge   on voices(challenge_id);
 create index if not exists idx_voices_region      on voices(region_code);
 create index if not exists idx_voices_owner       on voices(owner_id);
+create index if not exists idx_dialect_regions_parent on dialect_regions(parent_code);
 create index if not exists idx_variants_lemma     on variants(lemma_id);
+create index if not exists idx_variants_region    on variants(region_code);
 create index if not exists idx_utterances_region  on utterances(region_code);
+create index if not exists idx_utterance_variants_utterance on utterance_variants(utterance_id);
+create index if not exists idx_exposures_utterance on exposures(utterance_id);
+create unique index if not exists uq_utterances_source_region_text
+  on utterances(source, region_code, dialect_text, standard_text);
 
 -- ── RLS ──────────────────────────────────────────────────────
 -- 공개 데이터는 읽기 전용 공개. 사용자 녹음은 Supabase Anonymous Auth로 사용자를 만들고
 -- auth.uid() = voices.owner_id 조건으로 본인 row만 INSERT/SELECT/UPDATE한다.
 alter table regions            enable row level security;
+alter table dialect_regions    enable row level security;
 alter table challenges         enable row level security;
 alter table voices             enable row level security;
 alter table lemmas             enable row level security;
@@ -121,6 +136,7 @@ alter table utterance_variants enable row level security;
 alter table exposures          enable row level security;
 
 create policy "public read regions"    on regions    for select using (true);
+create policy "public read dialect regions" on dialect_regions for select using (true);
 create policy "public read challenges" on challenges for select using (true);
 create policy "public read lemmas"     on lemmas     for select using (true);
 create policy "public read variants"   on variants   for select using (true);
