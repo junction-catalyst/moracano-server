@@ -1,0 +1,47 @@
+{
+  "endpoint": "POST /api/voices/{id}/analyze",
+  "description": "기존 analyze 응답에 Voice Experience(억양 시각화·햅틱)용 syllables 배열을 추가한 목데이터. avg_pitch/labels 등 기존 필드는 변경 없음, syllables만 신규 추가.",
+  "sample": {
+    "voice_id": "mock-voice-004",
+    "region": "포항",
+    "prompt": "뭐라카노",
+    "avg_pitch": 245.8,
+    "pitch_std": 58.3,
+    "avg_duration": 0.21,
+    "duration_std": 0.09,
+    "labels": ["Rising Intonation", "Strong Rhythm Variation"],
+    "similar_regions": ["영덕", "경주"],
+    "pca_coord": [0.62, -0.35],
+    "status": "done",
+    "syllables": [
+      {
+        "text": "뭐",
+        "start": 0.00,
+        "end": 0.18,
+        "pitch_trend": "flat",
+        "haptic": { "duration_ms": 180, "intensity_start": 0.4, "intensity_end": 0.4, "sharpness": 0.3 }
+      },
+      {
+        "text": "라",
+        "start": 0.18,
+        "end": 0.34,
+        "pitch_trend": "flat",
+        "haptic": { "duration_ms": 160, "intensity_start": 0.4, "intensity_end": 0.4, "sharpness": 0.3 }
+      },
+      {
+        "text": "카",
+        "start": 0.34,
+        "end": 0.61,
+        "pitch_trend": "falling",
+        "haptic": { "duration_ms": 270, "intensity_start": 0.7, "intensity_end": 0.5, "sharpness": 0.5 }
+      },
+      {
+        "text": "노",
+        "start": 0.61,
+        "end": 0.79,
+        "pitch_trend": "rising",
+        "haptic": { "duration_ms": 180, "intensity_start": 0.5, "intensity_end": 0.9, "sharpness": 0.6 }
+      }
+    ]
+  }
+}

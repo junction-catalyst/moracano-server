@@ -42,3 +42,51 @@
 
 - 테스트용 실제 오디오 샘플 확보 (AI-Hub 경북 방언 데이터에서 몇 개 추출)
 - 위 7단계 완료 후 `docs/progress.md`에 세션 기록 추가
+
+## Voice Experience(시각화·햅틱)용 syllables 필드
+
+`analyze` 응답의 9개 피처는 발화 전체 요약값이라 음절 단위 시각화(억양 화살표)·햅틱 표현을
+못 만든다. 별도로 음절 단위 배열을 `syllables` 필드에 추가해서 백엔드에 넘긴다.
+
+### 햅틱 표현 리서치
+
+처음엔 `●`/`━━━`/`↑` 같은 기호로 표현하려 했으나, 이건 화면 표기일 뿐 실제 진동 재생에 못 쓴다.
+실제 서비스들의 저장 방식을 확인:
+
+- **iOS Core Haptics(AHAP)**: 이벤트 배열, 각 이벤트가 `Time`/`EventType`(Transient·Continuous)/
+  `HapticIntensity`(0~1)/`HapticSharpness`(0~1)를 가짐. Continuous 이벤트는 시간에 따라 강도가
+  변하는 ParameterCurve도 지원(램프).
+- **Android VibrationEffect**: `timings`(꺼짐/켜짐 지속시간 배열, ms) + `amplitudes`(구간별 세기,
+  0~255) 두 배열.
+- **공통점**: 기호가 아니라 시간(duration)+세기(intensity) 수치로 저장. AHAP/Android 둘 다
+  플랫폼별로 다운컨버트 가능한 추상 포맷(duration_ms, intensity_start/end, sharpness)으로
+  통일하기로 함.
+
+### syllables 스키마
+
+```json
+{
+  "text": "노",
+  "start": 0.61,
+  "end": 0.79,
+  "pitch_trend": "rising",
+  "haptic": {
+    "duration_ms": 180,
+    "intensity_start": 0.5,
+    "intensity_end": 0.9,
+    "sharpness": 0.6
+  }
+}
+```
+
+- `text`: 사용자가 실제로 말한 내용이 아니라 제시어(prompt) 텍스트를 음절 수만큼 자른 것 (ADR
+  0001, ASR 없음 결정 유지)
+- `pitch_trend`: 그 음절 구간 F0 기울기로 rising/falling/flat 판정
+- `haptic.intensity_start/end`: 값이 같으면 평탄, end>start면 상승(진동이 점점 세짐)으로 화살표
+  방향을 실제 진동 램프로 표현
+- 목데이터: `mocks/analyze-response-with-syllables.json`
+
+### ⚠️ 확인 필요
+
+웹앱인지 네이티브 앱인지에 따라 실현 가능성이 다름 — Safari는 Web Vibration API 자체를 지원하지
+않아 웹앱이면 iOS 사용자는 햅틱을 못 느낌. 팀과 플랫폼 확정 필요.
