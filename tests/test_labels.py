@@ -16,7 +16,7 @@ def test_no_labels_when_all_flat():
 
 
 def test_rising_intonation_label():
-    labels = generate_labels(base_features(pitch_slope_end=50.0))
+    labels = generate_labels(base_features(pitch_slope_end=150.0))
     assert "Rising Intonation" in labels
 
 
@@ -26,10 +26,10 @@ def test_long_vowel_usage_label():
 
 
 def test_strong_rhythm_variation_label():
-    labels = generate_labels(base_features(npvi=60.0))
+    labels = generate_labels(base_features(npvi=90.0))
     assert "Strong Rhythm Variation" in labels
 
 
 def test_multiple_labels_combine():
-    labels = generate_labels(base_features(pitch_slope_end=50.0, npvi=60.0))
+    labels = generate_labels(base_features(pitch_slope_end=150.0, npvi=90.0))
     assert set(labels) == {"Rising Intonation", "Strong Rhythm Variation"}

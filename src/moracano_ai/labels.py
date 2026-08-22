@@ -1,9 +1,10 @@
-# 임계값은 아직 AI-Hub 레퍼런스 코퍼스로 캘리브레이션 전이라 잠정값(placeholder).
-# docs/ai/plan.md Next 항목 완료되면 이 값들을 코퍼스 통계로 교체할 것.
+# AI-Hub 경상도 실발화 600개(10대~60대 이상, scripts/validate_alignment.py 시드 0·1)의 분포에서 잡은 값.
+# 상위 25%(npvi, 음절 길이)·상위 10%(끝 기울기, 28%가 0이라 p75는 의미 없음)를 "두드러짐"으로 본다.
+# 대화체 발화 기준이라 제시어 낭독 데이터가 쌓이면 다시 맞출 것. 수치는 docs/progress.md 2026-08-22 참고
 DEFAULT_THRESHOLDS = {
-    "rising_slope_hz_per_sec": 30.0,
-    "long_vowel_duration_sec": 0.25,
-    "high_npvi": 40.0,
+    "rising_slope_hz_per_sec": 120.0,
+    "long_vowel_duration_sec": 0.224,
+    "high_npvi": 75.0,
 }
 
 
