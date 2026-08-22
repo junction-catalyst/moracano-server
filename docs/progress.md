@@ -264,3 +264,35 @@ vocab에 `쫌` 등이 없어서였다. 둘 다 바로잡고 같은 코드로 다
 
 - 제시어 낭독 샘플로 임계값·PCA 재캘리브레이션(녹음 확보 전까지 보류), PCA 코퍼스 피처 추출 스크립트,
   짧은 발화 + 긴 휴지 케이스의 VAD 트리밍 검토.
+
+## 2026-08-22 — 온디바이스 전환: base 모델 기본값, 양자화 스터디, CoreML 산출물, 파이터 픽스처
+
+배포를 iOS 온디바이스로 결정(iOS 팀원이 녹음·CoreML 추론·정렬·피치 구현 보유). Python은 기준 구현 + 서버 폴백.
+
+- **`align.py`**: 기본 모델 `Kkonjeong/wav2vec2-base-korean`(`LARGE_ALIGNER_MODEL`·`MORACANO_ALIGNER_MODEL` env로
+  large 선택 가능). `forced_align_syllables`를 `prepare_tokens` / `ctc_log_probs` / `align_tokens` /
+  `raw_syllable_spans` / `finalize_spans`로 분리해 서버·검증·픽스처·양자화 시뮬레이션이 한 경로를 쓴다.
+  base fp32 재검증: 시드 0 36ms / 64% / 91%, 시드 1 37 / 63 / 90, 300/300 성공.
+- **양자화 스터디(`quant_sim.py`, `validate_alignment.py --quant/--pad-to/--no-normalize`)**: MFA 오차는 4bit까지
+  전부 36ms/64~65%로 같았고, 변별은 fp32 대비 경로 안정성(300발화 음절 시작 프레임 동일 비율): fp16 99.8%,
+  int8 98.6%, pal6g16 92.6%, int4b32 88.1%, pal4g16 84.7%; 라벨 동일 100 / 99.3 / 93.0 / 89.3 / 88.0%.
+  0 패딩(EnumeratedShapes 흉내) 93.5% / 라벨 85%, 정규화 생략 88.6%. → **int8 출하, RangeDim 입력, 정규화 유지**.
+- **임계값(base 분포, 600발화, `scripts/calibrate_thresholds.py`)**: npvi 58 → 76(p75 75.7), long vowel 0.23(p75
+  0.233), rising 25 반음/s(p90 26.5) 유지.
+- **CoreML(`scripts/export_coreml.py`, coremltools 9.0 + torch 2.7.1 격리 환경)**: weight_norm 제거 → 정규화 내장
+  래퍼 → RangeDim(8000~240000) mlprogram fp16 → int8 채널별(특징추출 conv·lm_head 제외). 산출물 189MB / 99.1MB,
+  traced vs eager 로그확률 차이 0. `artifacts/coreml/`에 `vocab.json`, `alignment_spec.json`, `sha256sums.txt`.
+- **파이터 픽스처**: `export_parity_fixtures.py`로 AI-Hub 40개 + `sample.wav` JSON/wav, `compare_parity.py`로 19개
+  기준 PASS/FAIL. fp32 자기 비교 전부 PASS. fp32 vs int8(41개): frame_argmax 99.5%, 토큰 시작 동일 98.7%, 음절
+  시간 20ms 이내 98.2%, 라벨 동일 97.6%, 피치 계열 100% PASS; 실패는 "토큰 시작 최대 1프레임"(한 발화에서 81프레임
+  이동), npvi/duration_std 2% 이내 90%, 햅틱 85%로, int8이 가끔 긴 휴지 경계를 옮기는 효과. 이 기준들은 같은
+  로그확률을 쓰는 Swift 포팅 검증용이라 모델 변형 비교엔 과하게 엄격함을 명시.
+- `tests/test_parity_fixtures.py`(`MORACANO_PARITY_TEST=1`일 때만)가 커밋된 `tests/fixtures/parity/sample.*`와
+  현재 파이프라인의 일치를 검사. `.gitignore`에 `artifacts/`, `scripts/out/`.
+
+### Next
+
+- iOS 팀원: `KoreanJamoCTC_int8.mlpackage` 로드, 픽스처 41개에서 `frame_argmax` ≥ 98% 확인, Xcode 성능 리포트로
+  ANE 배치·지연·메모리 측정(RangeDim이 GPU로 떨어지면 fp16 변형과 비교), Swift 덤프를 `compare_parity.py`로 검증.
+- F0 파이터가 안 맞으면 YIN 역치·hop부터 조정(허용오차는 `spec.py`).
+- 제시어 낭독 데이터 확보 후 임계값·PCA 재캘리브레이션.

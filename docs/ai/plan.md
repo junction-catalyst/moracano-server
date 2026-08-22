@@ -149,3 +149,63 @@ Core Haptics는 텍스트/트렌드를 몰라도 되고, 화면 렌더러는 AHA
 - 목데이터: `mocks/ai-service-contract.json`(AI 서비스 순수 입출력) /
   `mocks/backend-final-record.json`(voice_id·region·prompt·status 등 백엔드 소유 필드까지 합친 최종
   레코드)
+
+## 온디바이스(CoreML) 파이프라인
+
+배포가 서버가 아니라 iOS 온디바이스로 바뀌면서 정렬 모델을 `Kkonjeong/wav2vec2-base-korean`(94M, 자모 vocab)로
+바꿨다. Python 파이프라인은 그대로 **기준 구현 + 서버 폴백**이고, Swift 구현은 아래 명세와 파이터 픽스처로
+수치 검증한다. 상수는 `src/moracano_ai/spec.py`(→ `artifacts/coreml/alignment_spec.json`)가 단일 출처.
+
+### 모델 크기와 양자화 결정 (AI-Hub 300발화, MFA 대비 + fp32 대비 경로 안정성)
+
+| 변형 | mlpackage | onset 중앙값 / ≤50ms | 음절 시작 프레임 fp32와 동일 | 라벨 동일 |
+|---|---|---|---|---|
+| fp16 | 189 MB | 36ms / 64% | 99.8% | 100% |
+| **int8 (채널별, 출하)** | **99 MB** | 36ms / 65% | 98.6% | 99.3% |
+| 6bit 팔레타이즈 g16 | ~73 MB | 36ms / 64% | 92.6% | 93.0% |
+| 4bit 팔레타이즈 g16 | ~52 MB | 36ms / 65% | 84.7% | 88.0% |
+| int4 block32 | ~52 MB | 36ms / 64% | 88.1% | 89.3% |
+
+MFA 오차만으로는 4bit까지 구분이 안 되고, fp32와 같은 경로를 내는지(음절 시작 프레임 동일 ≥ 95%, 라벨 동일
+≥ 97%)가 변별 기준이다. int8만 통과. 특징추출 conv 7개와 `lm_head`는 항상 fp16(합쳐 9MB).
+EnumeratedShapes용 0 패딩은 라벨 동일 85%로 떨어져 **RangeDim(0.5~15초) 입력**을 쓴다. 입력 정규화 생략은 88.6%로 탈락.
+
+### 산출물 (`scripts/export_coreml.py`, 격리 환경에서 실행, `artifacts/coreml/` git 제외)
+
+`KoreanJamoCTC_fp16.mlpackage`(189MB), `KoreanJamoCTC_int8.mlpackage`(99MB), `vocab.json`(blank `[PAD]`=53),
+`alignment_spec.json`, `sha256sums.txt`. 모델 입력 `audio (1, L)` float32 원시 샘플(정규화는 모델 안에 포함),
+출력 `log_probs (1, T, 56)` fp32. traced vs eager 로그확률 차이 0.
+
+### Swift 쪽 알고리즘 명세 (`alignment_spec.json`과 같음)
+
+1. 녹음 → 16kHz 모노 Float32, 0.5~15초, 제시어당 최소 길이 `(2 * 자모수 + 1) * 0.02초`(CTC 실행 가능 조건).
+2. 제시어: 한글 완성형만 남김 → 자모 분해(초성 19 / 중성 21 / 종성 27, 호환 자모) → `(음절 번호, 토큰 id)`.
+3. CoreML 추론 → `log_probs (T, 56)`. `T`는 conv kernel [10,3,3,3,3,2,2] / stride [5,2,2,2,2,2,2]의 fold.
+   **frame_duration = 샘플수 / 16000 / T** (4초에서 20.09ms, 고정 20ms 아님).
+4. CTC 강제정렬: 상태 2L+1(짝수 = blank 53, 홀수 s = 토큰 (s+1)/2), alpha[0] = {blank, 첫 토큰}, 전이
+   s / s-1 / s-2(홀수이고 토큰이 직전 토큰과 다를 때), 마지막 프레임은 argmax(마지막 토큰, 마지막 blank), 역추적.
+   연속 같은 라벨을 하나의 span으로 합치고 blank는 버림(끝 프레임 exclusive). T < 토큰수 + 인접 중복이면 실패.
+5. 음절 구간: 토큰 span을 음절 번호로 묶음(첫 토큰 시작, 마지막 토큰 끝) → 시작에서 0.02초 뺌(0 하한) → 각 음절
+   끝 = 다음 음절 시작 → 마지막 음절 끝 = `speech_end`(없으면 앞 음절 보정 길이의 상위 중앙값) → 소수 3자리 반올림.
+6. `speech_end`: Praat intensity(최소 피치 75Hz → 창 6.4/75 = 85.3ms Kaiser β 20.24, 5ms 간격, dB)에서 마지막
+   음절 onset 이후 구간 피크보다 20dB 아래로 떨어지기 직전 시각.
+7. F0: 1차 60~700Hz → 유성 프레임 q25/q75 → 2차 floor max(50, 0.75 q25), ceiling min(700, 1.5 q75)
+   (유성 5프레임 미만이면 1차 유지). Swift는 YIN 계열 10ms hop으로 구현, Praat와 프레임별로는 다르므로
+   허용오차는 중앙값/유성 일치/기울기 부호 기준.
+8. 반음 = 12·log2(f0 / 발화 중앙값 F0), 구간 [첫 음절 시작, 마지막 음절 끝). 기울기는 최소제곱(프레임 3개 미만이면 0).
+   음절 trend: 역치 0.16 / max(T, 0.08)² 반음/s. 끝 기울기: 마지막 0.2초. 표준편차는 모집단(ddof 0).
+9. 라벨 임계값 rising 25 반음/s, long vowel 0.23s, npvi 76. 햅틱: intensity clamp(0.3 + 0.4·길이/평균길이),
+   sharpness flat 0.3 / rising 0.6 / falling 0.5, 끝 intensity ×1.3 / ×0.7(flat은 ParameterCurve 없음).
+
+### 파이터 픽스처 (`scripts/export_parity_fixtures.py`, `scripts/compare_parity.py`)
+
+AI-Hub 발화 40개(young/old, 3~12음절) + `tests/fixtures/sample.wav`. 발화마다 `.wav`(16k PCM16)와 `.json`:
+토큰, `frame_argmax`, 토큰 프레임 span, 음절 구간(보정 전/후), `speech_end`, intensity/F0 트랙, 피치 floor/ceiling,
+음절별 반음 기울기·역치·trend, 피처, 라벨, 햅틱. Swift 테스트 타깃이 같은 스키마로 JSON을 쓰면
+`uv run python scripts/compare_parity.py artifacts/parity/py_fp32 <swift_dir>`가 항목별 PASS/FAIL을 낸다.
+허용오차는 `spec.py`의 `PARITY_TOLERANCES`. AI-Hub 오디오는 재배포 금지라 `artifacts/parity/`는 git 제외
+(서버 `/data/aihub/mfa_work/corpus/` 원본, 팀 내부 공유만), `tests/fixtures/parity/sample.*`만 커밋.
+
+파이터가 깨지기 쉬운 순서: (1) F0 추적기(Praat AC vs YIN, 유성 경계·노년층 creaky), (2) intensity 창 정의
+(85ms Kaiser, 43ms RMS 아님), (3) 프레임 타이밍(공식 vs 고정 20ms), (4) 반열림 구간과 모집단 표준편차,
+(5) fp16/ANE 드리프트로 경계 1프레임 뒤집힘(int8 변형도 fp32 대비 음절 시작 1.4%가 바뀜).
