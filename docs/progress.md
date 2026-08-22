@@ -72,3 +72,34 @@ JunctionX Korea 2026 · moracano(경상북도 방언 Dialect Root) 프로젝트�
 - 서버에 이미 있는 MFA 결과물(`mfa_work/`)을 레퍼런스 코퍼스 전처리에 재사용할 수 있는지 확인.
 - Similar Voices를 완전히 뺄지, 광역 단위(경북 vs 타 시도)로 축소해서 부활시킬지는 추가 논의 여지 있음
   — 지금은 제거 상태로 진행.
+
+## 2026-08-22 — AI 서비스 프로토타입 구현 + 실제 검증
+
+`uv`로 `src/moracano_ai/` 패키지 스캐폴드 생성, 강제정렬 기반 분석 파이프라인을 실제로 구현하고
+end-to-end로 검증했다.
+
+- **모듈 구성**: `align.py`(wav2vec2 CTC 강제정렬), `prosody.py`(parselmouth 피치 추출),
+  `features.py`(9개 피처 계산), `labels.py`(임계값 기반 라벨), `haptic.py`(AHAP 패턴 생성),
+  `direction.py`(PCA 자리 채우는 임시 정규화 좌표), `service.py`(FastAPI `/analyze`), `schema.py`
+  (pydantic 응답 모델).
+- **강제정렬 구현 세부**: `kresnik/wav2vec2-large-xlsr-korean` 사용 — vocab을 직접 확인해보니
+  **완성형 한글 음절 단위(1205 토큰)**로 토크나이징돼 있어서, 자모 분해 후 재그룹핑하는 추가 단계 없이
+  CTC 출력이 곧바로 음절 단위 정렬이 됨(예상보다 단순해짐). `torchaudio.functional.forced_align` +
+  `merge_tokens`로 프레임 경로를 음절별 (start, end)로 변환.
+- **실제 검증**: macOS `say -v Yuna`로 "뭐라카노" 한국어 TTS 오디오를 합성해 실제 모델로 전체
+  파이프라인을 돌려봄 — 강제정렬→피치추출→피처계산→라벨→AHAP 햅틱까지 전부 정상 동작 확인
+  (`tests/fixtures/sample.wav`). 순수함수 20개 유닛테스트 전체 통과.
+- **레이턴시 측정(CPU, 로컬 맥북 기준)**: 모델 로드(콜드) 최초 1회 ~500초(다운로드 포함, 이후 캐시로
+  ~5초), 요청당 강제정렬 처리 시간 약 4.9초 — "녹음 후 몇 초 대기" 목표에 걸쳐 있음. 서버 GPU에서는
+  더 빨라질 것으로 예상되나, 실측 필요.
+- **의존성 이슈 해결**: `torchaudio.load`가 최신 버전에서 `torchcodec`을 요구해 의존성이 무거워져서,
+  오디오 로딩은 `soundfile`로 대체(리샘플링만 `torchaudio.functional.resample` 사용).
+
+### Next
+
+- 서버 GPU에서 실제 레이턴시 재측정 — CPU 4.9초가 기준이면 GPU로 개선 여지 확인.
+- 실제 AI-Hub 경북 방언 샘플(TTS 아님)로 정렬 품질 검증 — 지금은 합성 음성이라 실제 방언 발화에서도
+  강제정렬이 잘 되는지 미확인.
+- 라벨 임계값(`labels.py`의 `DEFAULT_THRESHOLDS`)과 PCA(`direction.py`의 placeholder)를 AI-Hub
+  레퍼런스 코퍼스 통계로 교체.
+- `POST /api/voices/{id}/analyze` 실제 엔드포인트로 배포(Docker) — 지금은 로컬 FastAPI 앱만 존재.
