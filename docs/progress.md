@@ -36,11 +36,41 @@ JunctionX Korea 2026 · moracano(경상북도 방언 Dialect Root) 프로젝트�
 
 ### Next
 
-- `POST /api/voices/{id}/analyze` 응답 스키마에 맞는 mock 샘플 3개 작성 (백엔드가 실제 분석 로직 없이
-  CRUD/프론트 연동 먼저 끝낼 수 있도록).
-- AI-Hub 경상북도 방언 데이터가 시군(포항/안동/대구권 등) 단위로 지역 라벨을 갖고 있는지 확인 —
-  Similar Voices/숲 단위 시각화가 이 세분화 여부에 달려 있음.
+- ~~`POST /api/voices/{id}/analyze` 응답 스키마에 맞는 mock 샘플 3개 작성~~ → 완료, `mocks/analyze-response-samples.json`.
+- ~~AI-Hub 경상북도 방언 데이터가 시군 단위로 지역 라벨을 갖고 있는지 확인~~ → 완료(`speaker.birthplace` 등
+  필드로 시군 필터링 가능), 아래 규명.
 - 라벨 임계값(Rising Intonation 등)과 PCA 변환행렬을 AI-Hub 레퍼런스 코퍼스로 사전 피팅하는 전처리
   스크립트 작성.
 - 충청도 관련 요소는 이 프로젝트 범위에 없음(이전 "경상도 vs 충청도 대결" 버전의 잔재였음, 삭제 확인됨) —
   경북 내부 시군 다양성에만 집중.
+
+## 2026-08-22 — Supabase 프로젝트 생성 및 초기 스키마 적용
+
+Supabase 프로젝트(`junction`, ref `nuofcxkxoaahnofytckg`, region `ap-northeast-2`)를 생성하고, 확정된
+API 명세(Challenge/Voice/Analysis/Dialect Root/Archive·Map/Lexicon 6도메인)에 맞춰 초기 스키마를
+Management API로 직접 적용했다.
+
+- **스키마 파일**: `docs/schema.sql`. 테이블 8개 — `regions`, `challenges`, `voices`, `lemmas`,
+  `variants`, `utterances`, `utterance_variants`, `exposures`.
+- **`voices` 테이블에 분석 결과를 직접 저장**한다(별도 `prosody_features` 테이블 없음) —
+  `mocks/analyze-response-samples.json`과 동일 필드(`avg_pitch`, `pitch_std`, `avg_duration`,
+  `duration_std`, `labels`, `similar_regions`, `pca_x`/`pca_y`, `status`). `POST /voices/{id}/analyze`가
+  이 행을 UPDATE하는 구조로 API 명세와 1:1 대응.
+- **RLS**: 공개 데이터(`regions`/`challenges`/`lemmas`/`variants`/`utterances`)는 읽기 전용 공개 정책.
+  `voices`/`exposures`는 익명 INSERT 허용(무로그인 설계). 분석 결과 UPDATE는 별도 정책 없음 —
+  Python 서버가 `sb_secret_...`(service_role 계열) 키로 RLS를 우회해 직접 쓴다.
+- **`regions` 시딩 완료**: 경상북도 23개 시군(포항·경주·김천·안동·구미·영주·영천·상주·문경·경산·
+  군위·의성·청송·영양·영덕·청도·고령·성주·칠곡·예천·봉화·울진·울릉) 전체 삽입, count 23 확인.
+- **키 3종 정리**: `SUPABASE_PUBLISHABLE_KEY`(iOS 앱에 그대로 심는 공개 키), `SUPABASE_SECRET_KEY`
+  (서버 전용, RLS 우회), `SUPABASE_ACCESS_TOKEN`(Management API용 `sbp_...` — **계정 전체 프로젝트에
+  접근 가능**하므로 스키마 변경 등 1회성 작업에만 쓰고 상시 보관하지 않는 게 안전). 전부 `.env`에만
+  존재, `.gitignore`로 추적 제외 확인.
+
+### Next
+
+- ⚠️ **mock 샘플의 `region: "대구"`가 실제 `regions` 시딩과 불일치** — 대구는 광역시라 경북 23개
+  시군에 포함되지 않음. mock을 경북 시군으로 교체하거나, "인접 문화권" 참고 데이터로 별도 처리할지
+  결정 필요.
+- Storage 버킷(`voices`) 생성 + 업로드 정책 설정 — 아직 미적용.
+- AI-Hub 라벨로 `lemmas`/`variants`/`utterances` 실데이터 적재 (현재는 스키마만 있고 데이터는 비어있음).
+- 라벨 임계값·PCA 변환행렬 사전 피팅 스크립트 작성 (이전 항목에서 이월).
