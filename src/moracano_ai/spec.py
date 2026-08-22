@@ -1,0 +1,50 @@
+# Swift(온디바이스) 구현이 Python 기준 구현과 맞춰야 하는 상수와 허용오차. torch를 import하지 않아
+# CoreML 변환용 격리 환경에서도 읽을 수 있다. 값을 바꾸면 align.py/prosody.py/labels.py의 상수도 같이 바꿀 것.
+from moracano_ai.labels import DEFAULT_THRESHOLDS
+
+ALIGNMENT_SPEC = {
+    "model": "Kkonjeong/wav2vec2-base-korean",
+    "sample_rate": 16000,
+    "input_seconds": {"min": 0.5, "max": 15.0},
+    "min_seconds_rule": "(2 * jamo_count + 1) * 0.02",
+    "normalization": "(x - mean(x)) / sqrt(var_population(x) + 1e-7), applied per recording before the model",
+    "blank_id": 53,
+    "conv_kernel": [10, 3, 3, 3, 3, 2, 2],
+    "conv_stride": [5, 2, 2, 2, 2, 2, 2],
+    "frame_duration_rule": "n_samples / sample_rate / num_frames (about 20.1 ms at 4 s, not a fixed 20 ms)",
+    "onset_lag_sec": 0.02,
+    "span_rule": "syllable end = next syllable start; last syllable end = speech_end (else median of others)",
+    "speech_end": {"min_pitch_hz": 75.0, "window_sec": 6.4 / 75.0, "kaiser_beta": 20.24, "time_step_sec": 0.005,
+                   "drop_db": 20.0},
+    "pitch": {"pass1_floor_hz": 60.0, "pass1_ceiling_hz": 700.0, "pass2_floor_rule": "max(50, 0.75 * q25)",
+              "pass2_ceiling_rule": "min(700, 1.5 * q75)", "min_voiced_frames": 5, "hop_sec": 0.01},
+    "semitone_reference": "median F0 over voiced frames inside [first syllable start, last syllable end)",
+    "slope": "least squares over frames inside the window, semitones per second, 0 if fewer than 3 frames",
+    "glissando_threshold": {"k": 0.16, "min_duration_sec": 0.08},
+    "tail_window_sec": 0.2,
+    "label_thresholds": DEFAULT_THRESHOLDS,
+    "haptic": {"intensity": "clamp(0.3 + 0.4 * duration / avg_duration)", "sharpness": {"flat": 0.3, "rising": 0.6,
+               "falling": 0.5}, "end_intensity": {"rising": 1.3, "falling": 0.7}},
+    "pca_placeholder": {"avg_pitch_range": [100.0, 300.0], "npvi_range": [0.0, 80.0]},
+}
+
+PARITY_TOLERANCES = {
+    "frame_argmax_agreement_min": 0.98,
+    "token_start_exact_min": 0.95,
+    "token_start_max_frame_diff": 1,
+    "syllable_time_sec": 0.02,
+    "syllable_time_pass_min": 0.95,
+    "speech_end_sec": 0.025,
+    "speech_end_pass_min": 0.90,
+    "f0_syllable_median_rel": 0.03,
+    "f0_syllable_median_pass_min": 0.90,
+    "voicing_agreement_min": 0.85,
+    "intensity_db": 0.5,
+    "feature_rel": {"avg_duration": 0.02, "duration_std": 0.02, "npvi": 0.02, "speaking_rate": 0.02,
+                    "avg_pitch": 0.05, "pitch_std": 0.05, "pitch_range": 0.10},
+    "pitch_slope_end": {"abs_st_per_sec": 3.0, "rel": 0.15},
+    "trend_agreement_min": 0.85,
+    "labels_identical_min": 0.95,
+    "haptic_time_sec": 0.02,
+    "haptic_intensity": 0.05,
+}

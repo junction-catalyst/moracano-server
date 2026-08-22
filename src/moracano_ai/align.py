@@ -1,0 +1,174 @@
+import os
+
+import soundfile as sf
+import torch
+import torchaudio
+from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor
+
+from moracano_ai.prosody import speech_end
+
+# 온디바이스 배포용 기본값: 자모 vocab 94M 모델(fp16 180MB, int8 90MB). MFA 대비 onset 중앙값 36ms,
+# 50ms 이내 64%, 완성형 OOV 없음. large(317M, 음절 vocab + OOV 근사 대체)는 29ms / 80%로 더 정확하지만
+# 앱에 넣기엔 커서 서버 옵션으로만 남김. 비교 수치는 docs/progress.md 2026-08-22 참고
+ALIGNER_MODEL = "Kkonjeong/wav2vec2-base-korean"
+LARGE_ALIGNER_MODEL = "kresnik/wav2vec2-large-xlsr-korean"
+TARGET_SAMPLE_RATE = 16000
+# CTC 토큰은 실제 음절 onset보다 한 프레임쯤 늦게 찍힘(MFA 대비 중앙값 +15~21ms), 그만큼 앞당김
+ONSET_LAG_SEC = 0.02
+
+
+def load_aligner(model_name: str | None = None) -> tuple[Wav2Vec2ForCTC, Wav2Vec2Processor]:
+    model_name = model_name or os.environ.get("MORACANO_ALIGNER_MODEL", ALIGNER_MODEL)
+    processor = Wav2Vec2Processor.from_pretrained(model_name)
+    model = Wav2Vec2ForCTC.from_pretrained(model_name)
+    model.eval()
+    model.to("cuda" if torch.cuda.is_available() else "cpu")
+    return model, processor
+
+
+def load_waveform(path: str) -> tuple[torch.Tensor, int]:
+    # torchaudio.load는 최신 버전에서 torchcodec을 요구해 의존성이 무거워지므로 soundfile로 읽음
+    data, sample_rate = sf.read(path, dtype="float32", always_2d=True)
+    waveform = torch.from_numpy(data.T)  # (channels, samples)
+    if waveform.shape[0] > 1:
+        waveform = waveform.mean(dim=0, keepdim=True)
+    if sample_rate != TARGET_SAMPLE_RATE:
+        waveform = torchaudio.functional.resample(waveform, sample_rate, TARGET_SAMPLE_RATE)
+        sample_rate = TARGET_SAMPLE_RATE
+    return waveform, sample_rate
+
+
+CHOSEONG = "ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ"
+JUNGSEONG = "ㅏㅐㅑㅒㅓㅔㅕㅖㅗㅘㅙㅚㅛㅜㅝㅞㅟㅠㅡㅢㅣ"
+JONGSEONG = [""] + list("ㄱㄲㄳㄴㄵㄶㄷㄹㄺㄻㄼㄽㄾㄿㅀㅁㅂㅄㅅㅆㅇㅈㅊㅋㅌㅍㅎ")
+
+
+def normalize_prompt(prompt: str) -> str:
+    # 제시어의 문장부호("뭐라카노?")·공백·숫자·영문은 음절이 아니라 정렬 대상에서 뺀다. 한글 완성형만 남김
+    return "".join(ch for ch in prompt if "가" <= ch <= "힣")
+
+
+def prompt_syllables(prompt: str) -> list[str]:
+    # 한글 음절 블록은 유니코드 완성형 1글자 = 1음절이라 공백만 걷어내면 됨
+    return [ch for ch in prompt if not ch.isspace()]
+
+
+def syllable_jamo(ch: str) -> list[str]:
+    code = ord(ch) - 0xAC00
+    if not 0 <= code < 11172:
+        return [ch]
+    lead, vowel, tail = code // 588, (code % 588) // 28, code % 28
+    return [CHOSEONG[lead], JUNGSEONG[vowel]] + ([JONGSEONG[tail]] if tail else [])
+
+
+LAX_ONSET = {"ㄲ": "ㄱ", "ㄸ": "ㄷ", "ㅃ": "ㅂ", "ㅆ": "ㅅ", "ㅉ": "ㅈ"}
+SIMPLE_VOWEL = {"ㅒ": "ㅐ", "ㅖ": "ㅔ", "ㅙ": "ㅞ", "ㅚ": "ㅞ", "ㅢ": "ㅣ"}
+
+
+def nearest_syllable(ch: str, vocab: dict) -> str | None:
+    # 음절 vocab 모델은 `쫌`·`괜`·`걔`처럼 빠진 완성형이 있어(AI-Hub 실발화의 14%) 발음이 가장 가까운 음절로
+    # 대체한다: 된소리→예사소리, 이중모음 단순화, 받침 제거 순. 위치만 찾는 용도라 근사 음절로도 충분
+    code = ord(ch) - 0xAC00
+    if not 0 <= code < 11172:
+        return None
+    lead, vowel, tail = CHOSEONG[code // 588], JUNGSEONG[(code % 588) // 28], code % 28
+    for lead2 in (lead, LAX_ONSET.get(lead, lead)):
+        for vowel2 in (vowel, SIMPLE_VOWEL.get(vowel, vowel)):
+            for tail2 in (tail, 0):
+                cand = chr(0xAC00 + CHOSEONG.index(lead2) * 588 + JUNGSEONG.index(vowel2) * 28 + tail2)
+                if cand in vocab:
+                    return cand
+    return None
+
+
+def prompt_tokens(syllables: list[str], vocab: dict) -> list[tuple[int, str]]:
+    # 음절 vocab(kresnik 계열)이면 음절 그대로(없으면 근사 음절), 자모 vocab(wav2vec2-base-korean 등)이면
+    # 자모로 분해해 (음절 번호, 토큰) 쌍으로 돌려준다. 자모 vocab은 완성형 음절이 전부 표현되므로 OOV가 없음
+    if "ㄱ" in vocab:
+        return [(i, j) for i, ch in enumerate(syllables) for j in syllable_jamo(ch)]
+    return [(i, ch if ch in vocab else nearest_syllable(ch, vocab) or ch) for i, ch in enumerate(syllables)]
+
+
+def prepare_tokens(prompt: str, vocab: dict) -> tuple[list[str], list[tuple[int, str]]]:
+    syllables = prompt_syllables(prompt)
+    tokens = prompt_tokens(syllables, vocab)
+    unknown = [tok for _, tok in tokens if tok not in vocab]
+    if unknown:
+        # 모델 vocab에 없는 음절(희귀 사투리 표기 등)이면 강제정렬이 불가능하니 상위에서 처리하게 예외로 알림
+        raise ValueError(f"prompt에 vocab 밖 음절 있음: {unknown}")
+    return syllables, tokens
+
+
+def ctc_log_probs(
+    waveform: torch.Tensor, sample_rate: int, model: Wav2Vec2ForCTC, processor: Wav2Vec2Processor
+) -> torch.Tensor:
+    param = next(model.parameters())
+    inputs = processor(waveform.squeeze(0).numpy(), sampling_rate=sample_rate, return_tensors="pt")
+    with torch.no_grad():
+        logits = model(inputs.input_values.to(device=param.device, dtype=param.dtype)).logits  # (1, T, C)
+    return torch.log_softmax(logits.float(), dim=-1)[0].cpu()  # (T, C)
+
+
+def align_tokens(log_probs: torch.Tensor, token_ids: list[int], blank_id: int) -> list[tuple[int, int]]:
+    targets = torch.tensor([token_ids], dtype=torch.int32)
+    aligned, scores = torchaudio.functional.forced_align(log_probs.unsqueeze(0), targets, blank=blank_id)
+    spans = torchaudio.functional.merge_tokens(aligned[0], scores[0], blank=blank_id)
+    if len(spans) != len(token_ids):
+        raise ValueError(f"정렬된 구간 수({len(spans)})가 토큰 수({len(token_ids)})와 다름")
+    return [(span.start, span.end) for span in spans]
+
+
+def raw_syllable_spans(
+    syllables: list[str], tokens: list[tuple[int, str]], frames: list[tuple[int, int]], frame_duration: float
+) -> list[dict]:
+    seconds = [(max(0.0, start * frame_duration - ONSET_LAG_SEC), end * frame_duration) for start, end in frames]
+    return group_spans(syllables, tokens, seconds)
+
+
+def finalize_spans(raw: list[dict], audio_end: float, speech_end_time: float | None) -> list[dict]:
+    return [
+        {**seg, "start": round(seg["start"], 3), "end": round(seg["end"], 3)}
+        for seg in extend_spans(raw, audio_end, speech_end_time)
+    ]
+
+
+def forced_align_syllables(
+    waveform: torch.Tensor,
+    sample_rate: int,
+    prompt: str,
+    model: Wav2Vec2ForCTC,
+    processor: Wav2Vec2Processor,
+) -> list[dict]:
+    vocab = processor.tokenizer.get_vocab()
+    syllables, tokens = prepare_tokens(prompt, vocab)
+    log_probs = ctc_log_probs(waveform, sample_rate, model, processor)
+    frames = align_tokens(log_probs, [vocab[tok] for _, tok in tokens], processor.tokenizer.pad_token_id)
+    n_samples = waveform.shape[-1]
+    raw = raw_syllable_spans(syllables, tokens, frames, n_samples / sample_rate / log_probs.shape[0])
+    end = speech_end(waveform.squeeze(0).numpy(), sample_rate, after=raw[-1]["start"])
+    return finalize_spans(raw, n_samples / sample_rate, end)
+
+
+def group_spans(syllables: list[str], tokens: list[tuple[int, str]], spans: list[tuple]) -> list[dict]:
+    grouped = [{"text": ch, "start": None, "end": None} for ch in syllables]
+    for (idx, _), (start, end) in zip(tokens, spans):
+        seg = grouped[idx]
+        seg["start"] = start if seg["start"] is None else seg["start"]
+        seg["end"] = end
+    return grouped
+
+
+def extend_spans(spans: list[dict], audio_end: float, speech_end_time: float | None = None) -> list[dict]:
+    # CTC는 음절을 1~2프레임(20~40ms)짜리 스파이크로만 내놓아 span 길이가 실제 음절 길이가 아님.
+    # AI-Hub 검증(scripts/validate_alignment.py)에서 onset은 MFA와 중앙값 29ms로 맞았으므로
+    # 각 음절의 끝을 다음 음절 onset까지 늘려 실제 길이에 가깝게 만든다. 마지막 음절은 intensity 기반
+    # 발화 끝(speech_end_time)을 쓰고, 없으면 앞 음절들의 중앙값 길이로 채운다.
+    extended = [{**seg, "end": nxt["start"]} for seg, nxt in zip(spans[:-1], spans[1:])]
+    last = spans[-1]
+    if speech_end_time is not None and speech_end_time > last["start"]:
+        last = {**last, "end": min(audio_end, max(last["end"], speech_end_time))}
+    elif extended:
+        durations = sorted(seg["end"] - seg["start"] for seg in extended)
+        typical = durations[len(durations) // 2]
+        last = {**last, "end": min(audio_end, max(last["end"], last["start"] + typical))}
+    return extended + [last]
