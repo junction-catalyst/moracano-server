@@ -45,10 +45,11 @@ def forced_align_syllables(
         # 모델 vocab에 없는 음절(희귀 사투리 표기 등)이면 강제정렬이 불가능하니 상위에서 처리하게 예외로 알림
         raise ValueError(f"prompt에 vocab 밖 음절 있음: {unknown}")
 
+    device = next(model.parameters()).device
     inputs = processor(waveform.squeeze(0).numpy(), sampling_rate=sample_rate, return_tensors="pt")
     with torch.no_grad():
-        logits = model(inputs.input_values).logits  # (1, T, C)
-    log_probs = torch.log_softmax(logits, dim=-1)
+        logits = model(inputs.input_values.to(device)).logits  # (1, T, C)
+    log_probs = torch.log_softmax(logits, dim=-1).cpu()
 
     blank_id = processor.tokenizer.pad_token_id
     target_ids = torch.tensor([[vocab[ch] for ch in syllables]], dtype=torch.int32)
@@ -62,11 +63,25 @@ def forced_align_syllables(
     if len(spans) != len(syllables):
         raise ValueError(f"정렬된 구간 수({len(spans)})가 음절 수({len(syllables)})와 다름")
 
-    return [
-        {
-            "text": ch,
-            "start": round(span.start * frame_duration, 3),
-            "end": round(span.end * frame_duration, 3),
-        }
+    raw = [
+        {"text": ch, "start": span.start * frame_duration, "end": span.end * frame_duration}
         for ch, span in zip(syllables, spans)
     ]
+    audio_end = waveform.shape[-1] / sample_rate
+    return [
+        {**seg, "start": round(seg["start"], 3), "end": round(seg["end"], 3)}
+        for seg in extend_spans(raw, audio_end)
+    ]
+
+
+def extend_spans(spans: list[dict], audio_end: float) -> list[dict]:
+    # CTC는 음절을 1~2프레임(20~40ms)짜리 스파이크로만 내놓아 span 길이가 실제 음절 길이가 아님.
+    # AI-Hub 검증(scripts/validate_alignment.py)에서 onset은 MFA와 중앙값 29ms로 맞았으므로
+    # 각 음절의 끝을 다음 음절 onset까지 늘려 실제 길이에 가깝게 만든다.
+    extended = [{**seg, "end": nxt["start"]} for seg, nxt in zip(spans[:-1], spans[1:])]
+    last = spans[-1]
+    if extended:
+        durations = sorted(seg["end"] - seg["start"] for seg in extended)
+        typical = durations[len(durations) // 2]
+        last = {**last, "end": min(audio_end, max(last["end"], last["start"] + typical))}
+    return extended + [last]
