@@ -10,9 +10,7 @@ def speech_end(samples: np.ndarray, sample_rate: int, after: float, drop_db: flo
     # 마지막 음절은 다음 음절 onset이 없어 CTC로는 끝을 못 잡는다. `after`(마지막 음절 onset) 이후 intensity가
     # 피크 대비 drop_db 아래로 떨어지기 직전 시각을 발화 끝으로 본다. AI-Hub 503발화에서 MFA 대비 오차 중앙값
     # 142ms → 45ms(20dB가 부호 편향 0으로 최적, 15dB는 -10ms, 25dB는 +25ms)
-    sound = parselmouth.Sound(samples.astype(np.float64), sampling_frequency=sample_rate)
-    intensity = sound.to_intensity(minimum_pitch=75.0, time_step=0.005)
-    times, values = intensity.xs(), intensity.values[0]
+    times, values = intensity_track(samples, sample_rate)
     tail = times >= after
     if not tail.any():
         return None
@@ -20,21 +18,32 @@ def speech_end(samples: np.ndarray, sample_rate: int, after: float, drop_db: flo
     return float(times[loud].max())
 
 
+def intensity_track(samples: np.ndarray, sample_rate: int) -> tuple[np.ndarray, np.ndarray]:
+    # Praat 방식: 최소 피치 75Hz 기준 6.4/75 = 85.3ms Kaiser 창(beta 20.24), 5ms 간격, dB
+    sound = parselmouth.Sound(samples.astype(np.float64), sampling_frequency=sample_rate)
+    intensity = sound.to_intensity(minimum_pitch=75.0, time_step=0.005)
+    return intensity.xs(), intensity.values[0]
+
+
 def pitch_contour(sound: parselmouth.Sound) -> tuple[np.ndarray, np.ndarray]:
     # 2-pass 추정(de Looze & Hirst 2008): 넓은 범위로 한 번 뽑아 화자의 q25/q75를 구한 뒤 그 화자에 맞는
     # floor/ceiling으로 다시 추출. 기본 75~600Hz 고정 범위에서는 AI-Hub 실발화의 35%에서 옥타브 점프가 섞였음
-    first = sound.to_pitch(pitch_floor=60.0, pitch_ceiling=700.0)
-    voiced = first.selected_array["frequency"]
-    voiced = voiced[voiced > 0]
-    if len(voiced) >= 5:
-        q25, q75 = np.percentile(voiced, [25, 75])
-        pitch = sound.to_pitch(pitch_floor=max(50.0, 0.75 * q25), pitch_ceiling=min(700.0, 1.5 * q75))
-    else:
-        pitch = first
+    floor, ceiling = pitch_bounds(sound)
+    pitch = sound.to_pitch(pitch_floor=floor, pitch_ceiling=ceiling)
     times = pitch.xs()
     f0 = pitch.selected_array["frequency"]
     f0 = np.where(f0 == 0, np.nan, f0)  # 0Hz는 무성구간(parselmouth 표기), 통계 계산에서 제외
     return times, f0
+
+
+def pitch_bounds(sound: parselmouth.Sound) -> tuple[float, float]:
+    first = sound.to_pitch(pitch_floor=60.0, pitch_ceiling=700.0)
+    voiced = first.selected_array["frequency"]
+    voiced = voiced[voiced > 0]
+    if len(voiced) < 5:
+        return 60.0, 700.0
+    q25, q75 = np.percentile(voiced, [25, 75])
+    return max(50.0, 0.75 * q25), min(700.0, 1.5 * q75)
 
 
 def segment_f0(times: np.ndarray, f0: np.ndarray, start: float, end: float) -> np.ndarray:
