@@ -1,3 +1,5 @@
+import os
+
 import soundfile as sf
 import torch
 import torchaudio
@@ -5,16 +7,18 @@ from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor
 
 from moracano_ai.prosody import speech_end
 
-# 음절 vocab 317M 모델 + OOV 근사 대체(nearest_syllable). 같은 조건에서 자모 vocab 94M 모델
-# (Kkonjeong/wav2vec2-base-korean)보다 onset 오차 중앙값 29ms vs 36ms, 50ms 이내 80% vs 64%로 더 정확.
-# 가볍게 가려면 base로 바꾸면 되고 코드 변경은 필요 없음. 비교 수치는 docs/progress.md 2026-08-22 참고
-ALIGNER_MODEL = "kresnik/wav2vec2-large-xlsr-korean"
+# 온디바이스 배포용 기본값: 자모 vocab 94M 모델(fp16 180MB, int8 90MB). MFA 대비 onset 중앙값 36ms,
+# 50ms 이내 64%, 완성형 OOV 없음. large(317M, 음절 vocab + OOV 근사 대체)는 29ms / 80%로 더 정확하지만
+# 앱에 넣기엔 커서 서버 옵션으로만 남김. 비교 수치는 docs/progress.md 2026-08-22 참고
+ALIGNER_MODEL = "Kkonjeong/wav2vec2-base-korean"
+LARGE_ALIGNER_MODEL = "kresnik/wav2vec2-large-xlsr-korean"
 TARGET_SAMPLE_RATE = 16000
 # CTC 토큰은 실제 음절 onset보다 한 프레임쯤 늦게 찍힘(MFA 대비 중앙값 +15~21ms), 그만큼 앞당김
 ONSET_LAG_SEC = 0.02
 
 
-def load_aligner(model_name: str = ALIGNER_MODEL) -> tuple[Wav2Vec2ForCTC, Wav2Vec2Processor]:
+def load_aligner(model_name: str | None = None) -> tuple[Wav2Vec2ForCTC, Wav2Vec2Processor]:
+    model_name = model_name or os.environ.get("MORACANO_ALIGNER_MODEL", ALIGNER_MODEL)
     processor = Wav2Vec2Processor.from_pretrained(model_name)
     model = Wav2Vec2ForCTC.from_pretrained(model_name)
     model.eval()
@@ -85,6 +89,49 @@ def prompt_tokens(syllables: list[str], vocab: dict) -> list[tuple[int, str]]:
     return [(i, ch if ch in vocab else nearest_syllable(ch, vocab) or ch) for i, ch in enumerate(syllables)]
 
 
+def prepare_tokens(prompt: str, vocab: dict) -> tuple[list[str], list[tuple[int, str]]]:
+    syllables = prompt_syllables(prompt)
+    tokens = prompt_tokens(syllables, vocab)
+    unknown = [tok for _, tok in tokens if tok not in vocab]
+    if unknown:
+        # 모델 vocab에 없는 음절(희귀 사투리 표기 등)이면 강제정렬이 불가능하니 상위에서 처리하게 예외로 알림
+        raise ValueError(f"prompt에 vocab 밖 음절 있음: {unknown}")
+    return syllables, tokens
+
+
+def ctc_log_probs(
+    waveform: torch.Tensor, sample_rate: int, model: Wav2Vec2ForCTC, processor: Wav2Vec2Processor
+) -> torch.Tensor:
+    param = next(model.parameters())
+    inputs = processor(waveform.squeeze(0).numpy(), sampling_rate=sample_rate, return_tensors="pt")
+    with torch.no_grad():
+        logits = model(inputs.input_values.to(device=param.device, dtype=param.dtype)).logits  # (1, T, C)
+    return torch.log_softmax(logits.float(), dim=-1)[0].cpu()  # (T, C)
+
+
+def align_tokens(log_probs: torch.Tensor, token_ids: list[int], blank_id: int) -> list[tuple[int, int]]:
+    targets = torch.tensor([token_ids], dtype=torch.int32)
+    aligned, scores = torchaudio.functional.forced_align(log_probs.unsqueeze(0), targets, blank=blank_id)
+    spans = torchaudio.functional.merge_tokens(aligned[0], scores[0], blank=blank_id)
+    if len(spans) != len(token_ids):
+        raise ValueError(f"정렬된 구간 수({len(spans)})가 토큰 수({len(token_ids)})와 다름")
+    return [(span.start, span.end) for span in spans]
+
+
+def raw_syllable_spans(
+    syllables: list[str], tokens: list[tuple[int, str]], frames: list[tuple[int, int]], frame_duration: float
+) -> list[dict]:
+    seconds = [(max(0.0, start * frame_duration - ONSET_LAG_SEC), end * frame_duration) for start, end in frames]
+    return group_spans(syllables, tokens, seconds)
+
+
+def finalize_spans(raw: list[dict], audio_end: float, speech_end_time: float | None) -> list[dict]:
+    return [
+        {**seg, "start": round(seg["start"], 3), "end": round(seg["end"], 3)}
+        for seg in extend_spans(raw, audio_end, speech_end_time)
+    ]
+
+
 def forced_align_syllables(
     waveform: torch.Tensor,
     sample_rate: int,
@@ -92,43 +139,14 @@ def forced_align_syllables(
     model: Wav2Vec2ForCTC,
     processor: Wav2Vec2Processor,
 ) -> list[dict]:
-    syllables = prompt_syllables(prompt)
     vocab = processor.tokenizer.get_vocab()
-    tokens = prompt_tokens(syllables, vocab)
-    unknown = [tok for _, tok in tokens if tok not in vocab]
-    if unknown:
-        # 모델 vocab에 없는 음절(희귀 사투리 표기 등)이면 강제정렬이 불가능하니 상위에서 처리하게 예외로 알림
-        raise ValueError(f"prompt에 vocab 밖 음절 있음: {unknown}")
-
-    device = next(model.parameters()).device
-    inputs = processor(waveform.squeeze(0).numpy(), sampling_rate=sample_rate, return_tensors="pt")
-    with torch.no_grad():
-        logits = model(inputs.input_values.to(device)).logits  # (1, T, C)
-    log_probs = torch.log_softmax(logits, dim=-1).cpu()
-
-    blank_id = processor.tokenizer.pad_token_id
-    target_ids = torch.tensor([[vocab[tok] for _, tok in tokens]], dtype=torch.int32)
-
-    aligned_tokens, scores = torchaudio.functional.forced_align(log_probs, target_ids, blank=blank_id)
-    spans = torchaudio.functional.merge_tokens(aligned_tokens[0], scores[0], blank=blank_id)
-
-    num_frames = logits.shape[1]
-    frame_duration = waveform.shape[-1] / sample_rate / num_frames
-
-    if len(spans) != len(tokens):
-        raise ValueError(f"정렬된 구간 수({len(spans)})가 토큰 수({len(tokens)})와 다름")
-
-    raw = group_spans(
-        syllables,
-        tokens,
-        [(max(0.0, s.start * frame_duration - ONSET_LAG_SEC), s.end * frame_duration) for s in spans],
-    )
-    audio_end = waveform.shape[-1] / sample_rate
+    syllables, tokens = prepare_tokens(prompt, vocab)
+    log_probs = ctc_log_probs(waveform, sample_rate, model, processor)
+    frames = align_tokens(log_probs, [vocab[tok] for _, tok in tokens], processor.tokenizer.pad_token_id)
+    n_samples = waveform.shape[-1]
+    raw = raw_syllable_spans(syllables, tokens, frames, n_samples / sample_rate / log_probs.shape[0])
     end = speech_end(waveform.squeeze(0).numpy(), sample_rate, after=raw[-1]["start"])
-    return [
-        {**seg, "start": round(seg["start"], 3), "end": round(seg["end"], 3)}
-        for seg in extend_spans(raw, audio_end, end)
-    ]
+    return finalize_spans(raw, n_samples / sample_rate, end)
 
 
 def group_spans(syllables: list[str], tokens: list[tuple[int, str]], spans: list[tuple]) -> list[dict]:
