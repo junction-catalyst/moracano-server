@@ -1,6 +1,7 @@
 import numpy as np
+import pytest
 
-from moracano_ai.prosody import npvi, pitch_trend, segment_f0, speech_end
+from moracano_ai.prosody import glissando_threshold, npvi, pitch_trend, segment_f0, semitones, speech_end
 
 
 def test_speech_end_finds_where_tone_stops():
@@ -24,18 +25,35 @@ def test_segment_f0_filters_by_time_and_drops_nan():
 
 
 def test_pitch_trend_rising():
-    segment = np.array([100.0, 150.0])
-    assert pitch_trend(segment, duration=0.2) == "rising"
+    times = np.array([0.0, 0.05, 0.1, 0.15])
+    assert pitch_trend(times, np.array([0.0, 1.0, 2.0, 3.0]), duration=0.2) == "rising"
 
 
 def test_pitch_trend_falling():
-    segment = np.array([150.0, 100.0])
-    assert pitch_trend(segment, duration=0.2) == "falling"
+    times = np.array([0.0, 0.05, 0.1, 0.15])
+    assert pitch_trend(times, np.array([3.0, 2.0, 1.0, 0.0]), duration=0.2) == "falling"
+
+
+def test_pitch_trend_flat_below_glissando_threshold():
+    # 0.2초 구간의 역치는 0.16/0.04 = 4 반음/s, 0.5반음 변화(2.5 반음/s)는 flat
+    times = np.array([0.0, 0.05, 0.1, 0.15])
+    assert pitch_trend(times, np.array([0.0, 0.15, 0.3, 0.45]), duration=0.2) == "flat"
 
 
 def test_pitch_trend_flat_when_too_short():
-    assert pitch_trend(np.array([100.0]), duration=0.2) == "flat"
-    assert pitch_trend(np.array([]), duration=0.2) == "flat"
+    assert pitch_trend(np.array([0.0, 0.1]), np.array([0.0, 5.0]), duration=0.2) == "flat"
+    assert pitch_trend(np.array([]), np.array([]), duration=0.2) == "flat"
+
+
+def test_semitones_relative_to_reference():
+    st = semitones(np.array([100.0, 200.0, 400.0]), 200.0)
+    assert list(np.round(st, 6)) == [-12.0, 0.0, 12.0]
+
+
+def test_glissando_threshold_is_steeper_for_short_segments():
+    assert glissando_threshold(0.2) == pytest.approx(4.0)
+    assert glissando_threshold(0.1) == pytest.approx(16.0)
+    assert glissando_threshold(0.02) == glissando_threshold(0.08)
 
 
 def test_npvi_zero_for_single_segment():

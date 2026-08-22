@@ -14,7 +14,7 @@
 | `avg_pitch` | 평균 F0 | 화자 전반 음높이 |
 | `pitch_std` | F0 표준편차 | 억양 기복 크기 |
 | `pitch_range` | F0 최댓값−최솟값 | 억양 폭(극단치 포착) |
-| `pitch_slope_end` | 발화 끝 구간(마지막 ~200ms) F0 기울기 | Rising Intonation 라벨 근거 |
+| `pitch_slope_end` | 발화 끝 구간(마지막 ~200ms) F0 기울기, 발화 중앙값 기준 반음/s(최소제곱) | Rising Intonation 라벨 근거 |
 | `syllable_count` | 검출된 음절 수 | 발화속도 계산용 |
 | `avg_syllable_duration` | 음절 평균 길이 | Long Vowel Usage 라벨 근거 |
 | `syllable_duration_std` | 음절 길이 표준편차 | 리듬 변동성 1차 지표 |

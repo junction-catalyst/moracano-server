@@ -1,16 +1,25 @@
 import numpy as np
 
-from moracano_ai.prosody import npvi, pitch_trend, segment_f0
+from moracano_ai.prosody import npvi, pitch_trend, segment_f0, segment_track, semitones, slope_per_sec
+
+TAIL_WINDOW_SEC = 0.2
+
+
+def semitone_track(aligned: list[dict], times: np.ndarray, f0: np.ndarray) -> np.ndarray:
+    utt_values = segment_f0(times, f0, aligned[0]["start"], aligned[-1]["end"])
+    reference = float(np.median(utt_values)) if len(utt_values) else 1.0
+    return semitones(f0, reference)
 
 
 def build_syllables_with_trend(
     aligned: list[dict], times: np.ndarray, f0: np.ndarray
 ) -> list[dict]:
+    st = semitone_track(aligned, times, f0)
     result = []
     for seg in aligned:
-        values = segment_f0(times, f0, seg["start"], seg["end"])
+        seg_times, values = segment_track(times, st, seg["start"], seg["end"])
         duration = seg["end"] - seg["start"]
-        result.append({**seg, "pitch_trend": pitch_trend(values, duration=duration)})
+        result.append({**seg, "pitch_trend": pitch_trend(seg_times, values, duration=duration)})
     return result
 
 
@@ -21,11 +30,9 @@ def compute_features(aligned: list[dict], times: np.ndarray, f0: np.ndarray) -> 
     durations = [seg["end"] - seg["start"] for seg in aligned]
     total_duration = utt_end - utt_start
 
-    tail_window = 0.2
-    tail_values = segment_f0(times, f0, max(utt_end - tail_window, utt_start), utt_end)
-    pitch_slope_end = 0.0
-    if len(tail_values) >= 2:
-        pitch_slope_end = round(float((tail_values[-1] - tail_values[0]) / tail_window), 2)
+    st = semitone_track(aligned, times, f0)
+    tail_times, tail_values = segment_track(times, st, max(utt_end - TAIL_WINDOW_SEC, utt_start), utt_end)
+    pitch_slope_end = round(slope_per_sec(tail_times, tail_values), 2)  # 반음/s
 
     return {
         "avg_pitch": round(float(np.mean(utt_values)), 2) if len(utt_values) else 0.0,

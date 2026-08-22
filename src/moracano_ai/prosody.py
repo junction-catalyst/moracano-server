@@ -43,13 +43,38 @@ def segment_f0(times: np.ndarray, f0: np.ndarray, start: float, end: float) -> n
     return values[~np.isnan(values)]
 
 
-def pitch_trend(segment: np.ndarray, threshold_hz_per_sec: float = 15.0, duration: float = 0.0) -> str:
-    if len(segment) < 2 or duration <= 0:
+def segment_track(times: np.ndarray, f0: np.ndarray, start: float, end: float) -> tuple[np.ndarray, np.ndarray]:
+    mask = (times >= start) & (times < end) & ~np.isnan(f0)
+    return times[mask], f0[mask]
+
+
+def semitones(f0: np.ndarray, reference: float) -> np.ndarray:
+    # Hz 기울기는 목소리가 높은 화자일수록 같은 억양에도 값이 커진다. 발화 중앙값 F0 기준 반음으로 바꾸면
+    # 남녀·개인 차이가 빠지고 청각적 크기에 비례한다
+    return 12 * np.log2(f0 / reference)
+
+
+def slope_per_sec(times: np.ndarray, values: np.ndarray) -> float:
+    # 끝점 두 개 차이는 F0 프레임 하나의 잡음에 흔들려서 최소제곱 기울기를 쓴다
+    if len(values) < 3 or np.ptp(times) <= 0:
+        return 0.0
+    return float(np.polyfit(times, values, 1)[0])
+
+
+def glissando_threshold(duration: float) -> float:
+    # 't Hart(1976) 글리산도 역치 G = 0.16/T^2 (반음/s): 짧은 구간일수록 가파른 변화여야 음높이 이동으로
+    # 들린다. 40ms 이하 구간은 역치가 발산하므로 80ms에서 cap
+    return 0.16 / max(duration, 0.08) ** 2
+
+
+def pitch_trend(times: np.ndarray, segment: np.ndarray, duration: float = 0.0) -> str:
+    if len(segment) < 3 or duration <= 0:
         return "flat"
-    slope = (segment[-1] - segment[0]) / duration
-    if slope > threshold_hz_per_sec:
+    slope = slope_per_sec(times, segment)
+    threshold = glissando_threshold(duration)
+    if slope > threshold:
         return "rising"
-    if slope < -threshold_hz_per_sec:
+    if slope < -threshold:
         return "falling"
     return "flat"
 
