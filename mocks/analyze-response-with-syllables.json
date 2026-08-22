@@ -10,7 +10,6 @@
     "avg_duration": 0.21,
     "duration_std": 0.09,
     "labels": ["Rising Intonation", "Strong Rhythm Variation"],
-    "similar_regions": ["영덕", "경주"],
     "pca_coord": [0.62, -0.35],
     "status": "done",
     "syllables": [

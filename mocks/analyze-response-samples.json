@@ -13,7 +13,6 @@
         "avg_duration": 0.21,
         "duration_std": 0.09,
         "labels": ["Rising Intonation", "Strong Rhythm Variation"],
-        "similar_regions": ["영덕", "경주"],
         "pca_coord": [0.62, -0.35],
         "status": "done"
       }
@@ -29,7 +28,6 @@
         "avg_duration": 0.15,
         "duration_std": 0.02,
         "labels": [],
-        "similar_regions": [],
         "pca_coord": [0.04, 0.02],
         "status": "done"
       }
@@ -45,7 +43,6 @@
         "avg_duration": 0.29,
         "duration_std": 0.04,
         "labels": ["Long Vowel Usage"],
-        "similar_regions": ["구미"],
         "pca_coord": [-0.18, 0.47],
         "status": "done"
       }

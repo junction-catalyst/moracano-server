@@ -23,10 +23,15 @@
 
 ### 기술 접근
 
-- **음절 분할(ASR 없음, ADR 0001 결정 유지)**: Intensity(에너지) 엔벨로프 피크 탐지 — 고전적
-  syllable nuclei counting(de Jong & Wempe) 방식을 `parselmouth` + `scipy` peak-picking으로 구현
+- **음절 타이밍(ASR 없음, ADR 0001 철학 유지 — 방법은 변경)**: 처음엔 Intensity 피크 탐지(에너지
+  기반 syllable nuclei counting)로 계획했으나, 정합성이 약하다는 문제 제기로 **강제정렬(forced
+  alignment)**로 전환. 제시어 텍스트를 이미 아니까 전사(ASR)는 여전히 불필요하고, 사전학습 한국어
+  wav2vec2 CTC 모델(예: `kresnik/wav2vec2-large-xlsr-korean`) + `torchaudio.functional.forced_align`으로
+  "이 텍스트가 오디오의 어느 시점에 있는지"만 계산. 학습/파인튜닝 없음. 서버에 상시 로드된 프로세스로
+  띄워서 요청마다 모델 재로딩 없이 실시간성 확보 (Docker, 온디바이스는 3일 스코프엔 과함 — CoreML
+  변환 자체는 반나절이지만 CTC 정렬 알고리즘을 Swift로 재구현하는 게 오래 걸림).
 - **피치**: `parselmouth`의 `sound.to_pitch()`로 F0 컨투어 추출
-- **리듬**: 검출된 음절 구간 길이 리스트에서 표준편차 + nPVI 계산
+- **리듬**: 강제정렬로 얻은 음절 구간 길이 리스트에서 표준편차 + nPVI 계산
 
 ## 개발 순서
 
