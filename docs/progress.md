@@ -107,3 +107,54 @@ Supabase 프로젝트(`junction`, ref `nuofcxkxoaahnofytckg`, region `ap-northea
 - AI-Hub 라벨/강제정렬 파이프라인 출력으로 `lemmas`/`variants`/`utterances`/`voices` 실데이터 적재
   (현재는 스키마만 있고 데이터는 비어있음, `regions` 제외).
 - 라벨 임계값·PCA 변환행렬 사전 피팅 스크립트 작성 (이전 항목에서 이월).
+
+## 2026-08-22 — Supabase Storage + 온디바이스 분석으로 스코프 재조정
+
+AI 모델/분석 로직을 iOS 로컬 온디바이스에서 실행하기로 하면서 별도 FastAPI/Python 분석 서버를 MVP
+범위에서 제거했다. 음성 파일과 분석 결과는 Supabase만 사용한다.
+
+- **Storage 결정**: Supabase Storage private `voices` bucket 사용. 데모 데이터는 10개 내외라 Free Plan
+  한도(파일 저장 1GB, egress 10GB) 안에서 충분하다. 업로드 파일은 m4a/aac, 파일 크기는 2MB 이하로 제한.
+- **데이터 흐름 변경**: iOS가 Anonymous Auth session 확보 → `voices` row 생성 →
+  `{owner_id}/{voice_id}.m4a` 업로드 → 온디바이스 분석 → 같은 `voices` row에 `avg_pitch`/`pitch_std`/
+  `avg_duration`/`duration_std`/`labels`/`pca_coord`/`syllables`/`haptic_pattern` update.
+- **API 변경**: `POST /voices/{id}/analyze` 자체 서버 API는 MVP에서 제거. 분석 트리거는 iOS 로컬 함수가
+  담당하고, 프론트는 Supabase row를 직접 조회한다.
+- **RLS 변경**: 소셜 로그인 없이 Supabase Anonymous Auth를 사용한다. iOS는 `auth.uid()`를
+  `voices.owner_id`에 저장하고, `voices` row와 Storage object는 owner 기준으로만 읽고 쓴다.
+- **Storage metadata 조회 정책 추가**: publishable key로 `/storage/v1/bucket/voices` 확인 시
+  `NoSuchBucket`처럼 보이지 않도록 `storage.buckets`의 `voices` row에만 select policy를 추가했다.
+  bucket 자체는 계속 private이다.
+- **계약 파일 변경**: `mocks/ai-service-contract.json`을 `mocks/on-device-analysis-contract.json`으로
+  변경하고, `mocks/backend-final-record.json` 설명도 온디바이스 분석 기준으로 수정했다.
+
+### Next
+
+- iOS에서 Anonymous Auth session 생성, `voices` row insert, Storage upload, 분석 결과 update,
+  `createSignedUrl` 기반 presigned URL 방식 재생을 한 번에 검증.
+- Supabase Dashboard에서 `voices` bucket이 private인지, 2MB 제한과 MIME 제한이 적용됐는지 확인.
+- 노출된 Management API access token은 작업 후 revoke/rotate.
+
+## 2026-08-22 — Anonymous Auth 기반 사용자 녹음 소유권 반영
+
+소셜 로그인/계정 UI를 만들기엔 MVP 범위가 과하므로, Supabase Anonymous Auth를 lightweight user
+boundary로 쓰는 방향으로 스키마 계약을 바꿨다. 사용자는 로그인 플로우가 없지만,
+DB/RLS 입장에서는 `auth.uid()`가 생기므로 사용자 녹음 row와 private Storage object를 본인 것만
+접근하게 제한할 수 있다.
+
+- **이슈/브랜치**: GitHub issue #1 기준 `feat/1-anonymous-voice-ownership` 브랜치에서 작업.
+- **`voices.owner_id` 추가**: `auth.users(id)`를 참조하는 nullable 컬럼으로 추가했다. 기존
+  healthcheck row가 있을 수 있어 즉시 `not null`로 잠그지 않고, 새 INSERT 정책에서
+  `auth.uid() = owner_id`를 강제한다.
+- **voices RLS 축소**: 기존 `public read/insert/update voices` 정책을 제거하고,
+  `users read own voices`, `users insert own voices`, `users update own voice analysis` 정책으로 교체했다.
+- **Storage RLS 축소**: `voices` bucket object는 `{auth.uid()}/{voice_id}.m4a` path에만 upload 가능하고,
+  read/createSignedUrl은 object `owner_id`가 현재 `auth.uid()`와 같을 때만 가능하다.
+- **계약 문서 반영**: `docs/ai/plan.md`와 `mocks/backend-final-record.json`에 `owner_id`와
+  `{owner_id}/{voice_id}.m4a` object path를 반영했다.
+
+### Next
+
+- Supabase Dashboard에서 Anonymous Sign-Ins를 enable해야 한다.
+- iOS에서 `signInAnonymously()` → `owner_id = session.user.id` → row insert → Storage upload →
+  on-device update → `createSignedUrl` 재생 플로우를 실기기/시뮬레이터에서 확인한다.
