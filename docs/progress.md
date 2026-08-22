@@ -103,3 +103,53 @@ end-to-end로 검증했다.
 - 라벨 임계값(`labels.py`의 `DEFAULT_THRESHOLDS`)과 PCA(`direction.py`의 placeholder)를 AI-Hub
   레퍼런스 코퍼스 통계로 교체.
 - `POST /api/voices/{id}/analyze` 실제 엔드포인트로 배포(Docker) — 지금은 로컬 FastAPI 앱만 존재.
+
+## 2026-08-22 — 실제 AI-Hub 방언 발화로 강제정렬 파이프라인 검증 (GPU 서버)
+
+팀 GPU 서버(RTX A6000 x4, 48코어)에서 `feat/prosody-extraction`(3bbd3fd)을 받아 `uv sync` 후, AI-Hub 경상도
+데이터의 실제 발화로 `forced_align_syllables` → 피처 → 라벨 → AHAP까지 end-to-end 검증했다. 입력은 서버에 이미
+있던 MFA 작업물(`/data/aihub/mfa_work/corpus/{young,old}/`)의 발화 단위 wav(세션 wav를 JSON start/end로 잘라둔
+것, 20,638개)이고, prompt는 같은 발화의 JSON `dialect_form`(문장부호·`~`·`-x-` 마커 제거). 검증 스크립트는
+`scripts/validate_alignment.py`(`uv run python scripts/validate_alignment.py --n 300`).
+
+- **환경**: `uv.lock`의 torch 2.13.0은 PyPI Linux 휠이라 그대로 CUDA 13.0 빌드(`2.13.0+cu130`)로 설치됨. 별도
+  인덱스 재설치 불필요, `torch.cuda.is_available() == True`. 모델 캐시 1.2GB, 317M 파라미터, vocab 1,207
+  (한글 완성형 1,202 + 특수 5).
+- **실제 방언 오디오에서 동작**: 300발화(young 150 / old 150, 화자 연령 10대~60대 이상) 중 252개 정상, 48개(16%)는
+  prompt에 vocab 밖 음절이 있어 `ValueError`. 정렬 구간 수 != 음절 수 예외는 0건(CTC 강제정렬 특성상 구조적으로
+  발생하지 않음).
+- **MFA 정합성(음절 onset, n=4,174 음절)**: 오차 중앙값 29ms, 평균 49ms, 50ms 이내 73%, 100ms 이내 92%. 발화 단위
+  MAE 중앙값 39ms, 100ms 초과 발화 7%, 200ms 초과 1%. young/old, 방언 어절 유무에 따른 차이 없음(중앙값 28~32ms).
+  MFA 사전에 없어 `spn`으로 처리된 어절(808음절)은 비교에서 제외. 크게 어긋난 케이스는 특정 화자/방언이 아니라
+  짧은 발화 + 긴 휴지(`그래서 인제 그`, 1.1s) 또는 말더듬/반복(`어 더 여유로운 생 어 시`)처럼 전사와 실제 발화가
+  느슨하게 대응하는 경우.
+- **핵심 버그 발견·수정: CTC span은 음절 길이가 아님**. `merge_tokens`가 주는 span은 토큰이 발화되는 1~2프레임
+  (20~40ms) 스파이크라, 수정 전 모든 발화에서 `avg_duration`이 0.020~0.026s, `duration_std` 0, `npvi` 0~30으로
+  나왔고 Long Vowel / Strong Rhythm 라벨이 한 번도 안 켜졌다(햅틱 EventDuration도 전부 20ms). onset은 MFA와
+  잘 맞으므로 각 음절 끝을 다음 음절 onset까지 늘리는 `extend_spans`를 `align.py`에 추가(마지막 음절은 앞
+  음절들의 중앙값 길이, 오디오 끝에서 cap). 수정 후 음절 길이 평균 184ms(MFA 167ms), offset 오차 중앙값 33ms,
+  100ms 이내 84%. 단, 마지막 음절 offset은 중앙값 132ms로 부정확(발화 끝 늘임은 반영 못 함).
+  수정 후 피처: `avg_duration` 중앙값 0.177s(p10 0.136, p90 0.257), `npvi` 48(p10 29, p90 69), `speaking_rate`
+  5.6음절/s. 라벨 분포(252발화): Strong Rhythm Variation 171, Rising Intonation 57, Long Vowel Usage 31 →
+  `DEFAULT_THRESHOLDS`(npvi 40, duration 0.25)가 실제 분포 대비 낮아 캘리브레이션 필요.
+- **음절 수 불일치 / OOV**: 학습 라벨 2,088,717발화 기준 마커(`#이름#`, `(())`, `{laughing}` 등) 포함 5.1%는
+  그대로는 정렬 불가. 마커 없는 1,981,354발화 중 14.1%가 vocab 밖 음절 포함(1.5% 음절 토큰). 최다 OOV는 **`쫌`**
+  (15만 회, 전체 방언 어절 태그의 32%)이고 `괜`·`깐`·`걔`·`툰`·`걍`·`쌤`·`땜`·`꽤` 등 표준어 음절도 빠져 있음.
+  자모 분해 후 된소리→예사소리, ㅒ→ㅐ 등, 받침 제거 순으로 대체하면 OOV 토큰의 96%를 vocab 안 음절로 매핑
+  가능(쫌→쪼, 괜→괘, 걔→개; `걍`·`놔`는 불가). 서비스의 제시어는 고정이므로 제시어 선정 시 vocab 사전 검사로
+  회피 가능, 레퍼런스 코퍼스 통계용으로는 fallback 매핑 필요.
+- **레이턴시(모델 로드 후, 발화 평균 4.3s)**: GPU 정렬 중앙값 25ms(최대 0.35s), parselmouth 피치+피처 5ms,
+  합계 30ms. 같은 서버 CPU(48코어)는 0.27s. 맥북 CPU 4.9s → GPU 30ms로 실시간 서비스 충분. 모델 콜드 로드 33s.
+- **피치 피처 의심점**: `pitch_range`가 250Hz 초과인 발화 45%, 300Hz 초과 35%. parselmouth 기본 설정(75~600Hz)
+  에서 옥타브 점프/무성 잡음이 섞이는 것으로 보임. `pitch_slope_end`는 19%에서 0(끝 200ms에 유성음 없음), 5%는
+  |500Hz/s| 초과. 성별별 `avg_pitch` 중앙값은 여 195Hz / 남 117Hz로 정상.
+
+### Next
+
+- wav2vec2 vs MFA 판단: onset 정합성은 충분(중앙값 29ms)하므로 wav2vec2 유지. MFA 전환은 불필요하되, 마지막
+  음절 길이와 발화 끝 늘임이 중요해지면 parselmouth intensity/voicing으로 마지막 음절 끝을 보정하는 방안 검토.
+- 피치 안정화: 성별/화자별 floor·ceiling, 옥타브 점프 제거(중앙값 필터), 반음(semitone) 단위로 slope 계산.
+- `DEFAULT_THRESHOLDS`·PCA를 AI-Hub 코퍼스 통계로 교체(레퍼런스 피처 추출 시 `scripts/validate_alignment.py`의
+  입력 경로·prompt 정제 로직 재사용).
+- 제시어 후보는 vocab 검사 통과한 것만 사용; OOV fallback 매핑(`쫌→쪼` 등)을 `align.py`에 넣을지 결정.
+- 서버 배포 시 `model.to("cuda")`는 `service.py` lifespan에서 호출해야 함(현재 `load_aligner`는 CPU에 올림).
