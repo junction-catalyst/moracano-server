@@ -1,6 +1,13 @@
 import pytest
 
-from moracano_ai.align import extend_spans, group_spans, prompt_syllables, prompt_tokens, syllable_jamo
+from moracano_ai.align import (
+    extend_spans,
+    group_spans,
+    nearest_syllable,
+    prompt_syllables,
+    prompt_tokens,
+    syllable_jamo,
+)
 
 
 def test_prompt_syllables_drops_whitespace():
@@ -18,6 +25,19 @@ def test_prompt_tokens_uses_syllables_for_syllable_vocab_and_jamo_otherwise():
     assert prompt_tokens(["뭐", "라"], syllable_vocab) == [(0, "뭐"), (1, "라")]
     jamo_vocab = {"ㄱ": 0}
     assert prompt_tokens(["뭐", "라"], jamo_vocab) == [(0, "ㅁ"), (0, "ㅝ"), (1, "ㄹ"), (1, "ㅏ")]
+
+
+def test_nearest_syllable_relaxes_onset_vowel_then_coda():
+    vocab = {"좀": 0, "조": 1, "괘": 2, "개": 3}
+    assert nearest_syllable("쫌", vocab) == "좀"
+    assert nearest_syllable("쫌", {"쪼": 0}) == "쪼"
+    assert nearest_syllable("괜", vocab) == "괘"
+    assert nearest_syllable("걔", vocab) == "개"
+    assert nearest_syllable("걍", vocab) is None
+
+
+def test_prompt_tokens_substitutes_oov_syllable_but_keeps_index():
+    assert prompt_tokens(["쫌", "더"], {"좀": 0, "더": 1}) == [(0, "좀"), (1, "더")]
 
 
 def test_group_spans_merges_jamo_spans_into_syllables():

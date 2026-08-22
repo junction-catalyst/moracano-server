@@ -196,6 +196,7 @@ def main() -> int:
             "utt": r["utt"], "band": r["band"], "age": r["age"], "sex": r["sex"], "prompt": prompt,
             "has_marker": has_marker, "n_eojeol": len(u["eojeolList"]), "n_dialect": n_dialect,
             "dur": float(r["end"]) - float(r["start"]),
+            "oov_syllables": [ch for ch in prompt if not ch.isspace() and ch not in vocab and "ㄱ" not in vocab],
         }
         try:
             result, timing = run_pipeline(str(wav), prompt, model, processor)
