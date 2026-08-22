@@ -166,10 +166,15 @@ drop policy if exists "public insert voices" on voices;
 drop policy if exists "public update voice analysis" on voices;
 
 drop policy if exists "users read own voices" on voices;
-create policy "users read own voices"
+drop policy if exists "users read done voices" on voices;
+drop policy if exists "users read own or done voices" on voices;
+create policy "users read own or done voices"
   on voices for select
   to authenticated
-  using ((select auth.uid()) = owner_id);
+  using (
+    (select auth.uid()) = owner_id
+    or status = 'done'
+  );
 
 drop policy if exists "users insert own voices" on voices;
 create policy "users insert own voices"

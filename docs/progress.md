@@ -138,3 +138,17 @@ lexicon 구조를 분리했다.
     Management API 경로는 `PATCH /v1/projects/{ref}/config/auth` +
     `{"external_anonymous_users_enabled": true}`이지만, 현재 전달된 `sbp_...` token은 이 endpoint에서
     `403 error code: 1010`을 반환했다.
+
+## 2026-08-23 — 완료된 다른 사용자 voice row 조회 허용
+
+프론트의 결과/비교 화면에서 다른 사용자의 완료된 분석 결과를 조회해야 해서, `voices` RLS에 공유 조회
+정책을 추가했다.
+
+- **적용 정책**: `users read own or done voices`
+- **범위**: `to authenticated using (auth.uid() = owner_id or status = 'done')`
+- **의미**:
+  - 본인 row는 모든 상태를 조회한다.
+  - 다른 사용자의 row는 `done` 상태만 조회할 수 있다.
+  - `pending`/`processing`/`failed` 상태의 다른 사용자 row는 계속 숨긴다.
+- **주의**: Storage object read policy는 여전히 owner 기준이다. 즉 이 변경은 `voices` row 조회 정책이며,
+  다른 사용자의 원본 오디오 파일 재생까지 공개하는 변경은 아니다.
