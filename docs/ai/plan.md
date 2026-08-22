@@ -50,7 +50,7 @@ Supabase Anonymous Auth의 `auth.uid()`로 구분한다.
 - Supabase Storage `voices` private bucket 업로드/`createSignedUrl` 재생 확인
 - iOS에서 `voices` row insert → Storage upload → 분석 결과 update → 결과 조회 플로우 확인
 - 실제 샘플 오디오 10개 내외로 값이 그럴듯하게 나오는지 확인
-- 위 3단계 완료 후 `docs/progress.md`에 세션 기록 추가
+- 위 3단계 완료 후 `docs/ai/progress.md`에 세션 기록 추가
 
 ## 저장 계약: 온디바이스 분석 출력 vs 최종 레코드
 
