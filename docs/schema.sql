@@ -1,6 +1,7 @@
--- moracano schema (v2)
--- 계약 원본: mocks/ai-service-contract.json (AI 서비스 순수 입출력), mocks/backend-final-record.json
--- (voices 테이블 + AI 출력을 합친 최종 레코드), docs/ai/plan.md.
+-- moracano schema (v4)
+-- 계약 원본: mocks/on-device-analysis-contract.json (iOS 온디바이스 분석 출력),
+-- mocks/backend-final-record.json (voices 테이블 + 분석 출력을 합친 최종 레코드),
+-- docs/ai/plan.md.
 --
 -- v1 대비 변경 (2026-08-22, 팀 실데이터 확인 반영):
 --   - similar_regions 제거 (AI-Hub가 시군 단위 지역 라벨을 주지 않아 Similar Voices 기능 자체가
@@ -32,10 +33,11 @@ create table if not exists challenges (
 );
 
 -- ── Voice + Analysis (결과는 voices 행에 직접 기록) ──────────
--- backend-final-record.json과 1:1 대응. voice_id/region/prompt/status는 백엔드 소유,
--- avg_pitch ~ haptic_pattern은 AI 서비스 출력을 그대로 UPDATE.
+-- backend-final-record.json과 1:1 대응. iOS는 Supabase Anonymous Auth의 auth.uid()를
+-- owner_id에 넣고, Storage 업로드 후 온디바이스 분석 결과를 직접 UPDATE한다.
 create table if not exists voices (
   id             uuid primary key default gen_random_uuid(),
+  owner_id       uuid references auth.users(id),
   challenge_id   bigint references challenges(id),
   region_code    text references regions(code),   -- 사용자 자기 신고 지역
   audio_path     text,
@@ -51,6 +53,8 @@ create table if not exists voices (
   haptic_pattern jsonb,               -- AHAP 그대로 (Version/Pattern/...), CHHapticPattern에 직결
   created_at     timestamptz not null default now()
 );
+
+alter table voices add column if not exists owner_id uuid references auth.users(id);
 
 -- ── Lexicon ──────────────────────────────────────────────────
 -- region_code는 AI-Hub 원 데이터의 광역 단위 태그(예: '경북')를 위한 자유 텍스트 — FK 없음.
@@ -100,12 +104,13 @@ create table if not exists exposures (
 -- ── indexes ──────────────────────────────────────────────────
 create index if not exists idx_voices_challenge   on voices(challenge_id);
 create index if not exists idx_voices_region      on voices(region_code);
+create index if not exists idx_voices_owner       on voices(owner_id);
 create index if not exists idx_variants_lemma     on variants(lemma_id);
 create index if not exists idx_utterances_region  on utterances(region_code);
 
 -- ── RLS ──────────────────────────────────────────────────────
--- 공개 데이터는 읽기 전용 공개. voices/exposures는 익명 INSERT 허용(무로그인 설계).
--- 분석 결과 UPDATE는 별도 정책 없음 — Python 서버가 secret key(service_role 계열)로 RLS 우회.
+-- 공개 데이터는 읽기 전용 공개. 사용자 녹음은 Supabase Anonymous Auth로 사용자를 만들고
+-- auth.uid() = voices.owner_id 조건으로 본인 row만 INSERT/SELECT/UPDATE한다.
 alter table regions            enable row level security;
 alter table challenges         enable row level security;
 alter table voices             enable row level security;
@@ -122,8 +127,73 @@ create policy "public read variants"   on variants   for select using (true);
 create policy "public read utterances" on utterances for select using (true);
 create policy "public read uv"         on utterance_variants for select using (true);
 
-create policy "public read voices"   on voices for select using (true);
-create policy "public insert voices" on voices for insert with check (true);
+drop policy if exists "public read voices" on voices;
+drop policy if exists "public insert voices" on voices;
+drop policy if exists "public update voice analysis" on voices;
+
+drop policy if exists "users read own voices" on voices;
+create policy "users read own voices"
+  on voices for select
+  to authenticated
+  using ((select auth.uid()) = owner_id);
+
+drop policy if exists "users insert own voices" on voices;
+create policy "users insert own voices"
+  on voices for insert
+  to authenticated
+  with check ((select auth.uid()) = owner_id);
+
+drop policy if exists "users update own voice analysis" on voices;
+create policy "users update own voice analysis"
+  on voices for update
+  to authenticated
+  using ((select auth.uid()) = owner_id)
+  with check (
+    (select auth.uid()) = owner_id
+    and status in ('pending','processing','done','failed')
+  );
 
 create policy "public read exposures"   on exposures for select using (true);
 create policy "public insert exposures" on exposures for insert with check (true);
+
+-- ── Storage ──────────────────────────────────────────────────
+-- Supabase Storage private bucket. iOS uploads m4a/aac audio to {auth.uid()}/{voice_id}.m4a,
+-- and replay uses short-lived presigned-style URLs via createSignedUrl.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+  'voices',
+  'voices',
+  false,
+  2097152,
+  array['audio/mp4', 'audio/m4a', 'audio/x-m4a', 'audio/aac', 'audio/mpeg', 'audio/wav']
+)
+on conflict (id) do update
+set public = false,
+    file_size_limit = excluded.file_size_limit,
+    allowed_mime_types = excluded.allowed_mime_types,
+    updated_at = now();
+
+drop policy if exists "public read voices bucket metadata" on storage.buckets;
+create policy "public read voices bucket metadata"
+  on storage.buckets for select
+  using (id = 'voices');
+
+drop policy if exists "public upload voice objects" on storage.objects;
+drop policy if exists "authenticated upload own voice objects" on storage.objects;
+create policy "authenticated upload own voice objects"
+  on storage.objects for insert
+  to authenticated
+  with check (
+    bucket_id = 'voices'
+    and (storage.foldername(name))[1] = (select auth.uid()::text)
+  );
+
+drop policy if exists "public read voice objects" on storage.objects;
+drop policy if exists "authenticated read own voice objects" on storage.objects;
+create policy "authenticated read own voice objects"
+  on storage.objects for select
+  to authenticated
+  using (
+    bucket_id = 'voices'
+    and owner_id = (select auth.uid()::text)
+  );

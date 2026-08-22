@@ -1,9 +1,11 @@
 {
-  "description": "Supabase voices 테이블 + AI 출력을 합쳐 프론트로 서빙하는 최종 레코드 예시. voice_id/region/prompt/status는 백엔드 소유(업로드·추천 시점에 이미 확정), 나머지는 ai-service-contract.json의 output을 그대로 병합.",
+  "description": "Supabase voices row와 온디바이스 분석 출력을 합친 최종 레코드 예시.",
   "record": {
     "voice_id": "mock-voice-001",
+    "owner_id": "00000000-0000-4000-8000-000000000001",
     "region": "포항",
     "prompt": "뭐라카노",
+    "audio_path": "00000000-0000-4000-8000-000000000001/mock-voice-001.m4a",
     "status": "done",
     "avg_pitch": 245.8,
     "pitch_std": 58.3,

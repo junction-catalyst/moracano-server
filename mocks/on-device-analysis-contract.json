@@ -1,7 +1,7 @@
 {
-  "description": "AI 분석 마이크로서비스의 순수 입출력 계약. voice_id/region/prompt/status는 백엔드 소유라 여기 없음 — prompt는 강제정렬 입력으로만 받음.",
+  "description": "iOS 온디바이스 분석 모듈의 순수 출력 계약.",
   "input": {
-    "audio": "오디오 파일(bytes 또는 백엔드가 준 임시 URL)",
+    "audio": "iOS 로컬 녹음 파일",
     "prompt": "뭐라카노"
   },
   "output_samples": [
@@ -56,7 +56,7 @@
       }
     },
     {
-      "case": "표준어에 가까움 — 변동 적음 (syllables/haptic_pattern 구조는 위와 동일, 값만 평탄)",
+      "case": "표준어에 가까움 — 변동 적음",
       "avg_pitch": 198.2,
       "pitch_std": 12.4,
       "avg_duration": 0.15,
@@ -65,7 +65,7 @@
       "pca_coord": [0.04, 0.02]
     },
     {
-      "case": "장음 위주 — 억양보다 길이 특징이 강함 (syllables/haptic_pattern 구조는 위와 동일)",
+      "case": "장음 위주 — 억양보다 길이 특징이 강함",
       "avg_pitch": 210.5,
       "pitch_std": 20.1,
       "avg_duration": 0.29,
