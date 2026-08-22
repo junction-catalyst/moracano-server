@@ -158,3 +158,27 @@ DB/RLS 입장에서는 `auth.uid()`가 생기므로 사용자 녹음 row와 priv
 - Supabase Dashboard에서 Anonymous Sign-Ins를 enable해야 한다.
 - iOS에서 `signInAnonymously()` → `owner_id = session.user.id` → row insert → Storage upload →
   on-device update → `createSignedUrl` 재생 플로우를 실기기/시뮬레이터에서 확인한다.
+
+## 2026-08-23 — 지역 확장형 seed 적재 구조 반영
+
+포항/경주/안동/구미처럼 시군 단위 seed 데이터를 추가해도 표제어와 출처 지역 의미가 섞이지 않도록
+lexicon 구조를 분리했다.
+
+- **`dialect_regions` 추가**: AI-Hub/seed 데이터 출처 지역을 관리한다. `GB` 같은 광역 태그와
+  `포항`/`경주` 같은 시군 태그를 함께 담을 수 있고, `level`은 `province` 또는 `city`로 제한한다.
+- **`lemmas` 전역화**: `lemmas.region_code`를 제거했다. `lemmas.standard_form`은 표준어 표제어 자체만
+  의미하며, 지역성은 `variants.region_code`와 `utterances.region_code`가 담당한다.
+- **출처 지역 FK**: `variants.region_code`, `utterances.region_code`는 `dialect_regions(code)`를
+  참조한다. `voices.region_code`는 기존대로 사용자가 앱에서 고른 `regions(code)`를 참조한다.
+- **원문발화 중복 방지**: `utterances(source, region_code, dialect_text, standard_text)` unique index를
+  추가했다. 같은 CSV를 다시 돌려도 같은 원문발화가 중복 삽입되지 않는다.
+- **CSV seed 자동화**: `scripts/seed_challenge_sentences.py`를 추가했다. CSV의 `eojeol_list`에서
+  `is_dialect=true`만 뽑아 `lemmas`/`variants`/`utterance_variants`를 만든다.
+
+### 검증
+
+- 라이브 Supabase에 `dialect_regions` 생성, 기존 `GB` 데이터 등록, FK와 unique index 적용 완료.
+- 기존 seed 데이터 count 유지: `challenges=116`, `utterances=116`, `lemmas=27`, `variants=29`,
+  `utterance_variants=116`, `dialect_regions=1`.
+- publishable key로 `dialect_regions` 조회 확인.
+- Supabase security advisor: lint 없음.
