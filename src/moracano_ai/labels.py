@@ -4,8 +4,8 @@
 # 같이 다시 잡을 것. 대화체 기준이라 제시어 낭독 데이터가 쌓이면 재캘리브레이션. docs/progress.md 참고
 DEFAULT_THRESHOLDS = {
     "rising_slope_hz_per_sec": 150.0,
-    "long_vowel_duration_sec": 0.22,
-    "high_npvi": 57.0,
+    "long_vowel_duration_sec": 0.23,
+    "high_npvi": 58.0,
 }
 
 
