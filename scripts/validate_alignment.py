@@ -18,6 +18,33 @@ from moracano_ai.features import build_syllables_with_trend, compute_features
 from moracano_ai.haptic import build_ahap_pattern
 from moracano_ai.labels import generate_labels
 from moracano_ai.prosody import load_sound, pitch_contour
+from moracano_ai.quant_sim import VARIANTS, apply_variant, pad_to_choices
+
+
+class CroppedModel(torch.nn.Module):
+    # 패딩된 입력으로 추론한 뒤 원래 길이에 해당하는 프레임만 남겨 frame_duration 계산이 깨지지 않게 함
+    def __init__(self, inner):
+        super().__init__()
+        self.inner = inner
+        self.keep_frames = None
+
+    def forward(self, x):
+        out = self.inner(x)
+        out.logits = out.logits[:, : self.keep_frames]
+        return out
+
+
+class PaddingProcessor:
+    def __init__(self, inner, model: CroppedModel, seconds: list[float]):
+        self.inner, self.model, self.seconds = inner, model, seconds
+        self.tokenizer = inner.tokenizer
+
+    def __call__(self, audio, sampling_rate, return_tensors):
+        out = self.inner(audio, sampling_rate=sampling_rate, return_tensors=return_tensors)
+        n = out.input_values.shape[-1]
+        self.model.keep_frames = int(self.model.inner._get_feat_extract_output_lengths(torch.tensor(n)))
+        out["input_values"] = pad_to_choices(out.input_values, sampling_rate, self.seconds)
+        return out
 
 MFA = Path("/data/aihub/mfa_work")
 LABEL_ZIPS = sorted(Path("/data/aihub/dialect_data/014.한국어_방언_발화_데이터(경상도)").rglob("*라벨링데이터*/*.zip"))
@@ -171,6 +198,9 @@ def main() -> int:
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--out", default="scripts/out")
     ap.add_argument("--model", default=None)
+    ap.add_argument("--quant", default="none", choices=VARIANTS)
+    ap.add_argument("--pad-to", default=None, help="comma separated seconds, simulates EnumeratedShapes")
+    ap.add_argument("--no-normalize", action="store_true")
     args = ap.parse_args()
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -179,6 +209,12 @@ def main() -> int:
     utts = load_json_utts({r["stem"] for r in rows})
     model, processor = load_aligner(args.model) if args.model else load_aligner()
     model.to(args.device)
+    model = apply_variant(model, args.quant)
+    if args.no_normalize:
+        processor.feature_extractor.do_normalize = False
+    if args.pad_to:
+        model = CroppedModel(model)
+        processor = PaddingProcessor(processor, model, [float(s) for s in args.pad_to.split(",")])
     vocab = processor.tokenizer.get_vocab()
 
     status = Counter()
