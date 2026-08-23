@@ -1,4 +1,4 @@
-# moracano AI
+# moracano backend & AI
 
 Moracano는 짧은 방언 발화를 음절 단위로 정렬하고, 피치·길이·리듬을 분석해 시각·촉각·청각
 인터랙션으로 변환하는 **온디바이스 음성 AI 프로젝트**입니다.
