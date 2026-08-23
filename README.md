@@ -40,6 +40,14 @@ User recording -> on-device feature extraction -> visualization data
 syllable timing, haptic feature를 추출하고, 그 결과를 `voices`에 저장합니다. 프론트엔드는
 저장된 lexicon, 예시문장, PCA 좌표, label을 사용해 사투리 유사도와 지역별 발화 패턴을 시각화합니다.
 
+### Structured Dialect Root
+
+사용자의 음성은 지역·문장 정보와 음절 단위 음향 특징이 연결된 `Structured Dialect Root`로
+변환됩니다. 시민은 이를 탐색하고 경험하며, 연구자와 기관을 위한 활용은 데이터 동의와 공개 범위를
+분리해 단계적으로 확장합니다.
+
+![Structured Dialect Root](docs/assets/moracano-structured-dialect-root-diagram.png)
+
 ## 백엔드 범위
 
 - Supabase Postgres는 지역, challenge, 방언 사전, seed 발화, 사용자 음성 메타데이터, 온디바이스
@@ -51,28 +59,14 @@ syllable timing, haptic feature를 추출하고, 그 결과를 `voices`에 저�
 
 ## ERD
 
-![Supabase schema ERD](docs/server/supabase-schema-nuofcxkxoaahnofytckg.png)
+![Moracano live schema ERD](docs/assets/moracano-live-schema-erd.png)
 
 ## 데이터 흐름
 
-```mermaid
-flowchart TB
-    seed["AI-Hub / seed CSV"]
-    align["표준어-방언 어절 alignment"]
-    db[("Supabase Postgres<br/>challenges · lemmas · variants · utterances")]
-    app["iOS App<br/>challenge 조회 · 녹음"]
-    analysis["On-device analysis<br/>pitch · duration · rhythm · syllables"]
-    storage[("Private Storage<br/>voice audio")]
-    voices[("voices<br/>analysis result")]
-    visual["Visualization<br/>지역별 표현 · 음성 특징 · PCA/label/haptic"]
+AI-Hub/curated seed 정규화부터 사용자 녹음, 온디바이스 분석, private 오디오 저장, 구조화된
+`voices` 레코드와 다감각 경험까지의 주요 흐름입니다.
 
-    seed --> align --> db --> app
-    app --> storage
-    app --> analysis --> voices
-    db --> visual
-    voices --> visual
-    storage -. "pre-signed URL" .-> visual
-```
+![Moracano major data flow](docs/assets/moracano-major-data-flow.png)
 
 ## 주요 테이블
 
