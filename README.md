@@ -1,4 +1,5 @@
 # moracano backend & AI
+![Moracano iOS 앱 음성 분석 데모](docs/assets/moracano-demo.gif)
 
 Moracano는 방언의 단어뿐 아니라 **말할 때 나타나는 높낮이, 길이, 리듬**을 기록하는
 온디바이스 음성 AI 프로젝트입니다.
