@@ -1,5 +1,9 @@
 # moracano backend & AI
-![Moracano iOS 앱 음성 분석 데모](docs/assets/moracano-demo.gif)
+
+<p align="center">
+  <img src="docs/assets/moracano-demo.gif" alt="Moracano iOS 앱 음성 분석 데모" width="70%">
+  <img src="docs/assets/뿌리%20지도.png" alt="Moracano 방언 뿌리 지도" width="24%">
+</p>
 
 Moracano는 방언의 단어뿐 아니라 **말할 때 나타나는 높낮이, 길이, 리듬**을 기록하는
 온디바이스 음성 AI 프로젝트입니다. 특히 backend & AI 파트는 공공 데이터와 사용자 음성 기록 바탕으로 억양 특성을 시각화하기 위한 데이터를 제공합니다.
@@ -7,7 +11,6 @@ Moracano는 방언의 단어뿐 아니라 **말할 때 나타나는 높낮이, �
 사용자가 제시된 방언 문장을 읽으면 On device AI 모델이 음성을 음절 단위로 나누고, 각 음절의 억양과 길이,
 리듬을 분석합니다. 분석 결과는 화면에서 글자의 움직임, 진동, 원본 음성으로 표현되며 이후 하나의 구조화된
 `Dialect Root`(뿌리 방언)로 저장됩니다.
-![Moracano 온디바이스 음성 AI 처리 단계](docs/assets/뿌리%20지도.png)
 
 모든 핵심 분석은 iPhone에서 on device로 실행됩니다.
 
